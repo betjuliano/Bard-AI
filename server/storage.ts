@@ -3,6 +3,8 @@ import {
   transcriptions,
   analyses,
   payments,
+  adminActions,
+  ADMIN_EMAIL,
   type User,
   type UpsertUser,
   type Transcription,
@@ -11,9 +13,11 @@ import {
   type InsertAnalysis,
   type Payment,
   type InsertPayment,
+  type AdminAction,
+  type InsertAdminAction,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, ilike, or } from "drizzle-orm";
+import { eq, desc, and, ilike, or, ne, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
@@ -44,6 +48,16 @@ export interface IStorage {
   createPayment(payment: InsertPayment): Promise<Payment>;
   createPaymentIdempotent(payment: InsertPayment): Promise<boolean>;
   updatePaymentStatus(id: number, status: string, stripePaymentId?: string): Promise<Payment>;
+
+  // Admin operations
+  getAllUsersExcludingAdmin(): Promise<User[]>;
+  getAllPayments(): Promise<Payment[]>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  setUserAsAdmin(userId: string): Promise<User>;
+  createManualPayment(payment: InsertPayment): Promise<Payment>;
+  createAdminAction(action: InsertAdminAction): Promise<AdminAction>;
+  getAdminActions(): Promise<AdminAction[]>;
+  addCreditsToUser(userId: string, transcriptionCredits: number, analysisCredits: number): Promise<User>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -240,6 +254,72 @@ export class DatabaseStorage implements IStorage {
       .where(eq(payments.id, id))
       .returning();
     return payment;
+  }
+
+  // Admin operations
+  async getAllUsersExcludingAdmin(): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(ne(users.isAdmin, true))
+      .orderBy(desc(users.createdAt));
+  }
+
+  async getAllPayments(): Promise<Payment[]> {
+    return await db
+      .select()
+      .from(payments)
+      .orderBy(desc(payments.createdAt));
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  async setUserAsAdmin(userId: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ isAdmin: true, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async createManualPayment(payment: InsertPayment): Promise<Payment> {
+    const [newPayment] = await db
+      .insert(payments)
+      .values({ ...payment, source: "manual" })
+      .returning();
+    return newPayment;
+  }
+
+  async createAdminAction(action: InsertAdminAction): Promise<AdminAction> {
+    const [newAction] = await db
+      .insert(adminActions)
+      .values(action)
+      .returning();
+    return newAction;
+  }
+
+  async getAdminActions(): Promise<AdminAction[]> {
+    return await db
+      .select()
+      .from(adminActions)
+      .orderBy(desc(adminActions.createdAt));
+  }
+
+  async addCreditsToUser(userId: string, transcriptionCredits: number, analysisCredits: number): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({
+        transcriptionCredits: sql`${users.transcriptionCredits} + ${transcriptionCredits}`,
+        analysisCredits: sql`${users.analysisCredits} + ${analysisCredits}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
   }
 }
 

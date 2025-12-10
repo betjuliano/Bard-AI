@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import multer from "multer";
 import fs from "fs";
@@ -8,6 +8,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { transcribeAudio, analyzeWithBardin } from "./openai";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
+import { ADMIN_EMAIL } from "@shared/schema";
 
 const upload = multer({
   dest: "/tmp/uploads/",
@@ -33,6 +34,26 @@ const upload = multer({
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Auth middleware
   await setupAuth(app);
+
+  // Admin middleware - validates user is admin
+  const isAdmin = async (req: any, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user || user.email !== ADMIN_EMAIL || !user.isAdmin) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      next();
+    } catch (error) {
+      console.error("Admin middleware error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  };
 
   // Auth routes
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
@@ -378,6 +399,145 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error handling checkout success:", error);
       res.status(500).json({ message: "Failed to process payment" });
+    }
+  });
+
+  // ========================================
+  // ADMIN ROUTES - Protected with isAdmin middleware
+  // ========================================
+
+  // Get all users (excluding admin)
+  app.get("/api/admin/users", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const users = await storage.getAllUsersExcludingAdmin();
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  // Get all payments
+  app.get("/api/admin/payments", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const payments = await storage.getAllPayments();
+      res.json(payments);
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+      res.status(500).json({ message: "Failed to fetch payments" });
+    }
+  });
+
+  // Get admin actions (audit log)
+  app.get("/api/admin/actions", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const actions = await storage.getAdminActions();
+      res.json(actions);
+    } catch (error) {
+      console.error("Error fetching admin actions:", error);
+      res.status(500).json({ message: "Failed to fetch admin actions" });
+    }
+  });
+
+  // Manual credit addition schema
+  const manualCreditSchema = z.object({
+    userId: z.string().min(1),
+    creditType: z.enum(["transcription", "analysis"]),
+    amount: z.number().int().positive().max(10000),
+    reason: z.string().min(1).max(500),
+  });
+
+  // Add manual credits to user
+  app.post("/api/admin/credits/manual", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const adminId = req.user.claims.sub;
+      
+      const parseResult = manualCreditSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid request data", errors: parseResult.error.errors });
+      }
+
+      const { userId, creditType, amount, reason } = parseResult.data;
+
+      // Verify target user exists
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Add credits to user
+      const transcriptionCredits = creditType === "transcription" ? amount : 0;
+      const analysisCredits = creditType === "analysis" ? amount : 0;
+      
+      const updatedUser = await storage.addCreditsToUser(userId, transcriptionCredits, analysisCredits);
+
+      // Create manual payment record
+      await storage.createManualPayment({
+        userId,
+        amount: 0,
+        currency: "BRL",
+        creditType,
+        creditsAmount: amount,
+        status: "completed",
+        source: "manual",
+        processedByAdminId: adminId,
+        reason,
+      });
+
+      // Log admin action
+      await storage.createAdminAction({
+        adminId,
+        targetUserId: userId,
+        actionType: "manual_credit_add",
+        payload: { creditType, amount, reason },
+      });
+
+      res.json({ 
+        success: true, 
+        message: `${amount} créditos de ${creditType === "transcription" ? "transcrição" : "análise"} adicionados com sucesso.`,
+        user: updatedUser 
+      });
+    } catch (error) {
+      console.error("Error adding manual credits:", error);
+      res.status(500).json({ message: "Failed to add credits" });
+    }
+  });
+
+  // Setup admin on first login with admin email
+  app.post("/api/admin/setup", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Only allow admin setup for the designated admin email
+      if (user.email !== ADMIN_EMAIL) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Already an admin
+      if (user.isAdmin) {
+        return res.json({ success: true, message: "Already admin" });
+      }
+
+      // Set user as admin
+      const updatedUser = await storage.setUserAsAdmin(userId);
+
+      // Log admin action
+      await storage.createAdminAction({
+        adminId: userId,
+        targetUserId: userId,
+        actionType: "admin_setup",
+        payload: { email: user.email },
+      });
+
+      res.json({ success: true, user: updatedUser });
+    } catch (error) {
+      console.error("Error setting up admin:", error);
+      res.status(500).json({ message: "Failed to setup admin" });
     }
   });
 }

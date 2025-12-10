@@ -24,6 +24,9 @@ export const sessions = pgTable(
   (table) => [index("IDX_session_expire").on(table.expire)],
 );
 
+// Admin email (hidden from public queries)
+export const ADMIN_EMAIL = "admjulianoo@gmail.com";
+
 // Users table for Replit Auth
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -35,6 +38,7 @@ export const users = pgTable("users", {
   freeTranscriptionUsed: boolean("free_transcription_used").default(false),
   transcriptionCredits: integer("transcription_credits").default(0),
   analysisCredits: integer("analysis_credits").default(0),
+  isAdmin: boolean("is_admin").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -107,8 +111,32 @@ export const payments = pgTable("payments", {
   creditType: varchar("credit_type").notNull(),
   creditsAmount: integer("credits_amount").notNull(),
   status: varchar("status").notNull().default("pending"),
+  source: varchar("source").notNull().default("stripe"),
+  processedByAdminId: varchar("processed_by_admin_id").references(() => users.id),
+  reason: text("reason"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// Admin actions audit table
+export const adminActions = pgTable("admin_actions", {
+  id: serial("id").primaryKey(),
+  adminId: varchar("admin_id").notNull().references(() => users.id),
+  targetUserId: varchar("target_user_id").references(() => users.id),
+  actionType: varchar("action_type").notNull(),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const adminActionsRelations = relations(adminActions, ({ one }) => ({
+  admin: one(users, {
+    fields: [adminActions.adminId],
+    references: [users.id],
+  }),
+  targetUser: one(users, {
+    fields: [adminActions.targetUserId],
+    references: [users.id],
+  }),
+}));
 
 // Internal product catalog for secure credit mapping - indexed by lookup key
 export const PRODUCT_CATALOG = {
@@ -167,6 +195,11 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
   createdAt: true,
 });
 
+export const insertAdminActionSchema = createInsertSchema(adminActions).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -180,3 +213,6 @@ export type Analysis = typeof analyses.$inferSelect;
 
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
+
+export type InsertAdminAction = z.infer<typeof insertAdminActionSchema>;
+export type AdminAction = typeof adminActions.$inferSelect;

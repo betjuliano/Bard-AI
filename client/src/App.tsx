@@ -17,6 +17,7 @@ import AnalysisDetailPage from "@/pages/analysis-detail";
 import CreditsPage from "@/pages/credits";
 import CheckoutSuccessPage from "@/pages/checkout-success";
 import CheckoutCancelPage from "@/pages/checkout-cancel";
+import AdminPage from "@/pages/admin";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -48,6 +49,7 @@ function Router() {
           <Route path="/creditos" component={CreditsPage} />
           <Route path="/checkout/success" component={CheckoutSuccessPage} />
           <Route path="/checkout/cancel" component={CheckoutCancelPage} />
+          <Route path="/admin" component={AdminPage} />
         </>
       )}
       <Route component={NotFound} />
