@@ -41,17 +41,12 @@ export default function CreditsPage() {
 
   const purchaseMutation = useMutation({
     mutationFn: async (creditType: "transcription" | "analysis") => {
-      const response = await apiRequest("POST", "/api/payments/create", { creditType });
-      return response;
+      const response = await apiRequest("POST", "/api/checkout/create", { creditType });
+      return response.json();
     },
     onSuccess: (data: any) => {
-      if (data.message) {
-        toast({
-          title: "Pagamento simulado",
-          description: data.message,
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      if (data.url) {
+        window.location.href = data.url;
       }
     },
     onError: (error: Error) => {

@@ -31,6 +31,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  stripeCustomerId: varchar("stripe_customer_id"),
   freeTranscriptionUsed: boolean("free_transcription_used").default(false),
   transcriptionCredits: integer("transcription_credits").default(0),
   analysisCredits: integer("analysis_credits").default(0),

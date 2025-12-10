@@ -5,6 +5,8 @@ import fs from "fs";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { transcribeAudio, analyzeWithBardin } from "./openai";
+import { stripeService } from "./stripeService";
+import { getStripePublishableKey } from "./stripeClient";
 
 const upload = multer({
   dest: "/tmp/uploads/",
@@ -290,53 +292,86 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments/create", isAuthenticated, async (req: any, res) => {
+  // Get Stripe publishable key for frontend
+  app.get("/api/stripe/config", async (req, res) => {
+    try {
+      const publishableKey = await getStripePublishableKey();
+      res.json({ publishableKey });
+    } catch (error) {
+      console.error("Error getting Stripe config:", error);
+      res.status(500).json({ message: "Failed to get Stripe config" });
+    }
+  });
+
+  // Create Stripe checkout session
+  app.post("/api/checkout/create", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
       const { creditType } = req.body;
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
       if (!creditType || !["transcription", "analysis"].includes(creditType)) {
         return res.status(400).json({ message: "Invalid credit type" });
       }
 
-      // Create payment record (simulated for now - Stripe integration would go here)
-      const payment = await storage.createPayment({
-        userId,
-        amount: 3500, // R$ 35.00 in cents
-        currency: "BRL",
-        creditType,
-        creditsAmount: creditType === "transcription" ? 100 : 1,
-        status: "pending",
-      });
-
-      // Simulate successful payment
-      await storage.updatePaymentStatus(payment.id, "completed");
-
-      // Update user credits
-      const user = await storage.getUser(userId);
-      if (user) {
-        if (creditType === "transcription") {
-          await storage.updateUserCredits(
-            userId,
-            (user.transcriptionCredits || 0) + 100,
-            user.analysisCredits || 0
-          );
-        } else {
-          await storage.updateUserCredits(
-            userId,
-            user.transcriptionCredits || 0,
-            (user.analysisCredits || 0) + 1
-          );
-        }
+      // Create or get Stripe customer
+      let stripeCustomerId = user.stripeCustomerId;
+      if (!stripeCustomerId) {
+        const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
+        const customer = await stripeService.createCustomer(
+          user.email || "",
+          userId,
+          fullName || undefined
+        );
+        stripeCustomerId = customer.id;
+        await storage.updateUserStripeCustomerId(userId, customer.id);
       }
 
-      res.json({ 
-        success: true, 
-        message: `Créditos de ${creditType === "transcription" ? "transcrição" : "análise"} adicionados com sucesso!` 
-      });
+      // Create checkout session
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const session = await stripeService.createCheckoutSession(
+        stripeCustomerId,
+        creditType as "transcription" | "analysis",
+        `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        `${baseUrl}/checkout/cancel`,
+        userId
+      );
+
+      res.json({ url: session.url });
     } catch (error) {
-      console.error("Error creating payment:", error);
-      res.status(500).json({ message: "Failed to create payment" });
+      console.error("Error creating checkout session:", error);
+      res.status(500).json({ message: "Failed to create checkout session" });
+    }
+  });
+
+  // Handle successful checkout
+  app.get("/api/checkout/success", isAuthenticated, async (req: any, res) => {
+    try {
+      const { session_id } = req.query;
+      
+      if (!session_id) {
+        return res.status(400).json({ message: "Missing session ID" });
+      }
+
+      const result = await stripeService.handlePaymentSuccess(session_id as string);
+      
+      if (result.success) {
+        res.json({ 
+          success: true, 
+          creditType: result.creditType,
+          creditsAmount: result.creditsAmount,
+          message: `Créditos adicionados com sucesso!` 
+        });
+      } else {
+        res.status(400).json({ message: "Payment not completed" });
+      }
+    } catch (error) {
+      console.error("Error handling checkout success:", error);
+      res.status(500).json({ message: "Failed to process payment" });
     }
   });
 }

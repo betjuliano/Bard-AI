@@ -20,6 +20,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   updateUserCredits(userId: string, transcriptionCredits?: number, analysisCredits?: number): Promise<User>;
+  updateUserStripeCustomerId(userId: string, stripeCustomerId: string): Promise<User>;
   markFreeTranscriptionUsed(userId: string): Promise<void>;
 
   // Transcription operations
@@ -89,6 +90,15 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set({ freeTranscriptionUsed: true, updatedAt: new Date() })
       .where(eq(users.id, userId));
+  }
+
+  async updateUserStripeCustomerId(userId: string, stripeCustomerId: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ stripeCustomerId, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
   }
 
   // Transcription operations

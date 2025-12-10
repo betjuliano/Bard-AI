@@ -15,6 +15,8 @@ import AnalysesPage from "@/pages/analyses";
 import NewAnalysisPage from "@/pages/new-analysis";
 import AnalysisDetailPage from "@/pages/analysis-detail";
 import CreditsPage from "@/pages/credits";
+import CheckoutSuccessPage from "@/pages/checkout-success";
+import CheckoutCancelPage from "@/pages/checkout-cancel";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -44,6 +46,8 @@ function Router() {
           <Route path="/analises/nova" component={NewAnalysisPage} />
           <Route path="/analises/:id" component={AnalysisDetailPage} />
           <Route path="/creditos" component={CreditsPage} />
+          <Route path="/checkout/success" component={CheckoutSuccessPage} />
+          <Route path="/checkout/cancel" component={CheckoutCancelPage} />
         </>
       )}
       <Route component={NotFound} />

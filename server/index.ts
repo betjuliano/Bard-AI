@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { runMigrations } from "stripe-replit-sync";
+import { getStripeSync } from "./stripeClient";
+import { WebhookHandlers } from "./webhookHandlers";
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,16 +14,6 @@ declare module "http" {
     rawBody: unknown;
   }
 }
-
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
-
-app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -32,6 +25,94 @@ export function log(message: string, source = "express") {
 
   console.log(`${formattedTime} [${source}] ${message}`);
 }
+
+// Initialize Stripe schema and sync data on startup
+async function initStripe() {
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    log("DATABASE_URL not found, skipping Stripe initialization", "stripe");
+    return;
+  }
+
+  try {
+    log("Initializing Stripe schema...", "stripe");
+    await runMigrations({ 
+      databaseUrl,
+      schema: "stripe"
+    });
+    log("Stripe schema ready", "stripe");
+
+    const stripeSync = await getStripeSync();
+
+    log("Setting up managed webhook...", "stripe");
+    const domains = process.env.REPLIT_DOMAINS?.split(",") || [];
+    const webhookBaseUrl = domains.length > 0 ? `https://${domains[0]}` : "";
+    
+    if (webhookBaseUrl) {
+      const { webhook, uuid } = await stripeSync.findOrCreateManagedWebhook(
+        `${webhookBaseUrl}/api/stripe/webhook`,
+        {
+          enabled_events: ["*"],
+          description: "Managed webhook for IA Transcreve",
+        }
+      );
+      log(`Webhook configured: ${webhook.url} (UUID: ${uuid})`, "stripe");
+    }
+
+    log("Syncing Stripe data...", "stripe");
+    stripeSync.syncBackfill()
+      .then(() => log("Stripe data synced", "stripe"))
+      .catch((err: any) => log(`Error syncing Stripe data: ${err.message}`, "stripe"));
+  } catch (error: any) {
+    log(`Failed to initialize Stripe: ${error.message}`, "stripe");
+  }
+}
+
+// Initialize Stripe on startup
+await initStripe();
+
+// Register Stripe webhook route BEFORE express.json()
+// Critical: webhook needs raw Buffer, not parsed JSON
+app.post(
+  "/api/stripe/webhook/:uuid",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["stripe-signature"];
+
+    if (!signature) {
+      return res.status(400).json({ error: "Missing stripe-signature" });
+    }
+
+    try {
+      const sig = Array.isArray(signature) ? signature[0] : signature;
+
+      if (!Buffer.isBuffer(req.body)) {
+        log("Webhook error: req.body is not a Buffer", "stripe");
+        return res.status(500).json({ error: "Webhook processing error" });
+      }
+
+      const { uuid } = req.params;
+      await WebhookHandlers.processWebhook(req.body as Buffer, sig, uuid);
+
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      log(`Webhook error: ${error.message}`, "stripe");
+      res.status(400).json({ error: "Webhook processing error" });
+    }
+  }
+);
+
+// Now apply JSON middleware for all other routes
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
+
+app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -70,9 +151,6 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -80,10 +158,6 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {
