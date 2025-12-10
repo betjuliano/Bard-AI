@@ -29,8 +29,16 @@ Preferred communication style: Simple, everyday language.
 ### Data Storage
 - **Database**: PostgreSQL with Drizzle ORM
 - **Schema Location**: `shared/schema.ts` - shared between client and server
-- **Tables**: users, sessions, transcriptions, analyses, payments
+- **Tables**: users, sessions, transcriptions, analyses, payments, admin_actions
 - **Migrations**: Managed via drizzle-kit with output to `./migrations`
+
+### Admin System
+- **Admin Email**: Defined in `shared/schema.ts` as `ADMIN_EMAIL`
+- **Access Control**: Double-check with email match AND isAdmin flag
+- **Admin Routes**: Protected with isAuthenticated + isAdmin middleware
+- **Audit Trail**: All admin actions logged in admin_actions table
+- **Manual Credits**: Admin can add credits via /admin page with reason logging
+- **Admin Page**: `/admin` - Hidden from navigation, shows "Acesso Restrito" for non-admins
 
 ### AI Integration
 - **Transcription**: OpenAI Whisper API (`whisper-1` model) for Portuguese language audio
