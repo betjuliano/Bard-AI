@@ -101,7 +101,7 @@ export const analysesRelations = relations(analyses, ({ one }) => ({
 export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().references(() => users.id),
-  stripePaymentId: varchar("stripe_payment_id"),
+  stripePaymentId: varchar("stripe_payment_id").unique(),
   amount: integer("amount").notNull(),
   currency: varchar("currency").notNull().default("BRL"),
   creditType: varchar("credit_type").notNull(),
@@ -109,6 +109,32 @@ export const payments = pgTable("payments", {
   status: varchar("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// Internal product catalog for secure credit mapping - indexed by lookup key
+export const PRODUCT_CATALOG = {
+  transcription_100: {
+    lookupKey: 'transcription_100',
+    priceInCents: 3500,
+    credits: 100,
+    creditType: 'transcription' as const,
+    name: 'Pacote Transcrição - 100 páginas',
+    description: '100 páginas de transcrição automática com IA',
+  },
+  analysis_1: {
+    lookupKey: 'analysis_1',
+    priceInCents: 3500,
+    credits: 1,
+    creditType: 'analysis' as const,
+    name: 'Pacote Análise Bardin - 1 análise',
+    description: '1 análise qualitativa completa baseada em Bardin',
+  },
+} as const;
+
+// Map credit types to lookup keys (server-controlled, not client)
+export const CREDIT_TYPE_TO_LOOKUP_KEY: Record<string, keyof typeof PRODUCT_CATALOG> = {
+  transcription: 'transcription_100',
+  analysis: 'analysis_1',
+};
 
 export const paymentsRelations = relations(payments, ({ one }) => ({
   user: one(users, {

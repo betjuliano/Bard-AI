@@ -40,7 +40,9 @@ export interface IStorage {
 
   // Payment operations
   getPaymentsByUser(userId: string): Promise<Payment[]>;
+  getPaymentByStripeId(stripePaymentId: string): Promise<Payment | undefined>;
   createPayment(payment: InsertPayment): Promise<Payment>;
+  createPaymentIdempotent(payment: InsertPayment): Promise<boolean>;
   updatePaymentStatus(id: number, status: string, stripePaymentId?: string): Promise<Payment>;
 }
 
@@ -202,12 +204,29 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(payments.createdAt));
   }
 
+  async getPaymentByStripeId(stripePaymentId: string): Promise<Payment | undefined> {
+    const [payment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.stripePaymentId, stripePaymentId));
+    return payment;
+  }
+
   async createPayment(payment: InsertPayment): Promise<Payment> {
     const [newPayment] = await db
       .insert(payments)
       .values(payment)
       .returning();
     return newPayment;
+  }
+
+  async createPaymentIdempotent(payment: InsertPayment): Promise<boolean> {
+    const result = await db
+      .insert(payments)
+      .values(payment)
+      .onConflictDoNothing({ target: payments.stripePaymentId })
+      .returning();
+    return result.length > 0;
   }
 
   async updatePaymentStatus(id: number, status: string, stripePaymentId?: string): Promise<Payment> {

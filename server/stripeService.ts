@@ -1,6 +1,7 @@
 // Stripe service - connection:conn_stripe_01KC58QQV1T82GN4BC0PVYGJBK
 import { getUncachableStripeClient } from './stripeClient';
 import { storage } from './storage';
+import { PRODUCT_CATALOG, CREDIT_TYPE_TO_LOOKUP_KEY } from '@shared/schema';
 
 export class StripeService {
   async createCustomer(email: string, userId: string, name?: string) {
@@ -21,11 +22,12 @@ export class StripeService {
   ) {
     const stripe = await getUncachableStripeClient();
     
-    const productName = creditType === 'transcription' 
-      ? 'Pacote Transcrição - 100 páginas'
-      : 'Pacote Análise Bardin - 1 análise';
+    const lookupKey = CREDIT_TYPE_TO_LOOKUP_KEY[creditType];
+    if (!lookupKey) {
+      throw new Error(`Invalid credit type: ${creditType}`);
+    }
     
-    const creditsAmount = creditType === 'transcription' ? 100 : 1;
+    const product = PRODUCT_CATALOG[lookupKey];
 
     return await stripe.checkout.sessions.create({
       customer: customerId,
@@ -34,12 +36,13 @@ export class StripeService {
         price_data: {
           currency: 'brl',
           product_data: {
-            name: productName,
-            description: creditType === 'transcription'
-              ? '100 páginas de transcrição automática com IA'
-              : '1 análise qualitativa completa baseada em Bardin',
+            name: product.name,
+            description: product.description,
+            metadata: {
+              lookupKey: product.lookupKey,
+            },
           },
-          unit_amount: 3500, // R$ 35.00 in cents
+          unit_amount: product.priceInCents,
         },
         quantity: 1,
       }],
@@ -48,52 +51,101 @@ export class StripeService {
       cancel_url: cancelUrl,
       metadata: {
         userId,
-        creditType,
-        creditsAmount: creditsAmount.toString(),
+        lookupKey: product.lookupKey,
       },
     });
   }
 
-  async handlePaymentSuccess(sessionId: string) {
+  async verifyCheckoutSession(sessionId: string) {
     const stripe = await getUncachableStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     
-    if (session.payment_status === 'paid' && session.metadata) {
-      const userId = session.metadata.userId;
-      const creditType = session.metadata.creditType as 'transcription' | 'analysis';
-      const creditsAmount = parseInt(session.metadata.creditsAmount || '0');
-      
-      const user = await storage.getUser(userId);
-      if (user) {
-        if (creditType === 'transcription') {
-          await storage.updateUserCredits(
-            userId,
-            (user.transcriptionCredits || 0) + creditsAmount,
-            user.analysisCredits || 0
-          );
-        } else {
-          await storage.updateUserCredits(
-            userId,
-            user.transcriptionCredits || 0,
-            (user.analysisCredits || 0) + creditsAmount
-          );
-        }
-
-        await storage.createPayment({
-          userId,
-          stripePaymentId: session.payment_intent as string,
-          amount: session.amount_total || 3500,
-          currency: 'BRL',
-          creditType,
-          creditsAmount,
-          status: 'completed',
-        });
-
-        return { success: true, creditType, creditsAmount };
+    if (session.payment_status === 'paid' && session.metadata?.lookupKey) {
+      const lookupKey = session.metadata.lookupKey as keyof typeof PRODUCT_CATALOG;
+      const product = PRODUCT_CATALOG[lookupKey];
+      if (!product) {
+        return { success: false };
       }
+      return { 
+        success: true, 
+        creditType: product.creditType, 
+        creditsAmount: product.credits,
+        message: `${product.credits} crédito(s) de ${product.creditType === 'transcription' ? 'transcrição' : 'análise'} serão adicionados em breve.`
+      };
     }
     
     return { success: false };
+  }
+
+  async processCheckoutCompleted(session: {
+    metadata?: { userId?: string; lookupKey?: string } | null;
+    payment_intent?: string;
+    amount_total?: number | null;
+  }) {
+    if (!session.metadata?.userId || !session.metadata?.lookupKey) {
+      return { success: false, error: 'Missing metadata' };
+    }
+
+    const userId = session.metadata.userId;
+    const lookupKey = session.metadata.lookupKey as keyof typeof PRODUCT_CATALOG;
+    
+    const product = PRODUCT_CATALOG[lookupKey];
+    if (!product) {
+      return { success: false, error: 'Invalid lookup key' };
+    }
+    
+    const expectedAmount = product.priceInCents;
+    
+    if (session.amount_total !== expectedAmount) {
+      console.error(`[stripe] Amount mismatch: expected ${expectedAmount}, got ${session.amount_total}`);
+      return { success: false, error: 'Amount mismatch' };
+    }
+    
+    const user = await storage.getUser(userId);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    const stripePaymentId = session.payment_intent as string;
+    
+    try {
+      const created = await storage.createPaymentIdempotent({
+        userId,
+        stripePaymentId,
+        amount: expectedAmount,
+        currency: 'BRL',
+        creditType: product.creditType,
+        creditsAmount: product.credits,
+        status: 'completed',
+      });
+      
+      if (!created) {
+        console.log('[stripe] Payment already processed (idempotent)');
+        return { success: true, message: 'Payment already processed' };
+      }
+      
+      if (product.creditType === 'transcription') {
+        await storage.updateUserCredits(
+          userId,
+          (user.transcriptionCredits || 0) + product.credits,
+          user.analysisCredits || 0
+        );
+      } else {
+        await storage.updateUserCredits(
+          userId,
+          user.transcriptionCredits || 0,
+          (user.analysisCredits || 0) + product.credits
+        );
+      }
+
+      return { success: true, creditType: product.creditType, creditsAmount: product.credits };
+    } catch (error: any) {
+      if (error.code === '23505') {
+        console.log('[stripe] Payment already processed (unique constraint)');
+        return { success: true, message: 'Payment already processed' };
+      }
+      throw error;
+    }
   }
 }
 

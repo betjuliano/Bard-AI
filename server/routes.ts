@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import multer from "multer";
 import fs from "fs";
+import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { transcribeAudio, analyzeWithBardin } from "./openai";
@@ -304,18 +305,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Create Stripe checkout session
+  const checkoutRequestSchema = z.object({
+    creditType: z.enum(["transcription", "analysis"]),
+  });
+
   app.post("/api/checkout/create", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
-      const { creditType } = req.body;
+      
+      const parseResult = checkoutRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid credit type" });
+      }
+      const { creditType } = parseResult.data;
 
       if (!user) {
         return res.status(404).json({ message: "User not found" });
-      }
-
-      if (!creditType || !["transcription", "analysis"].includes(creditType)) {
-        return res.status(400).json({ message: "Invalid credit type" });
       }
 
       // Create or get Stripe customer
@@ -348,7 +354,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Handle successful checkout
+  // Handle successful checkout - read-only verification
   app.get("/api/checkout/success", isAuthenticated, async (req: any, res) => {
     try {
       const { session_id } = req.query;
@@ -357,14 +363,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "Missing session ID" });
       }
 
-      const result = await stripeService.handlePaymentSuccess(session_id as string);
+      const result = await stripeService.verifyCheckoutSession(session_id as string);
       
       if (result.success) {
         res.json({ 
           success: true, 
           creditType: result.creditType,
           creditsAmount: result.creditsAmount,
-          message: `Créditos adicionados com sucesso!` 
+          message: result.message || `Pagamento confirmado! Seus créditos serão adicionados em breve.`
         });
       } else {
         res.status(400).json({ message: "Payment not completed" });
