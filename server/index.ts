@@ -69,8 +69,10 @@ async function initStripe() {
   }
 }
 
-// Initialize Stripe on startup
-await initStripe();
+// Initialize Stripe on startup (wrapped for CommonJS compatibility)
+initStripe().catch((err) => {
+  log(`Stripe initialization error: ${err.message}`, "stripe");
+});
 
 // Register Stripe webhook route BEFORE express.json()
 // Critical: webhook needs raw Buffer, not parsed JSON
