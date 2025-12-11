@@ -1,7 +1,7 @@
 // Stripe service - connection:conn_stripe_01KC58QQV1T82GN4BC0PVYGJBK
 import { getUncachableStripeClient } from './stripeClient';
 import { storage } from './storage';
-import { PRODUCT_CATALOG, CREDIT_TYPE_TO_LOOKUP_KEY } from '@shared/schema';
+import { PRODUCT_CATALOG } from '@shared/schema';
 
 export class StripeService {
   async createCustomer(email: string, userId: string, name?: string) {
@@ -15,19 +15,13 @@ export class StripeService {
 
   async createCheckoutSession(
     customerId: string, 
-    creditType: 'transcription' | 'analysis',
     successUrl: string, 
     cancelUrl: string,
     userId: string
   ) {
     const stripe = await getUncachableStripeClient();
     
-    const lookupKey = CREDIT_TYPE_TO_LOOKUP_KEY[creditType];
-    if (!lookupKey) {
-      throw new Error(`Invalid credit type: ${creditType}`);
-    }
-    
-    const product = PRODUCT_CATALOG[lookupKey];
+    const product = PRODUCT_CATALOG.credits_100;
 
     return await stripe.checkout.sessions.create({
       customer: customerId,
@@ -68,9 +62,8 @@ export class StripeService {
       }
       return { 
         success: true, 
-        creditType: product.creditType, 
         creditsAmount: product.credits,
-        message: `${product.credits} crédito(s) de ${product.creditType === 'transcription' ? 'transcrição' : 'análise'} serão adicionados em breve.`
+        message: `${product.credits} créditos serão adicionados em breve.`
       };
     }
     
@@ -114,7 +107,7 @@ export class StripeService {
         stripePaymentId,
         amount: expectedAmount,
         currency: 'BRL',
-        creditType: product.creditType,
+        creditType: 'credits',
         creditsAmount: product.credits,
         status: 'completed',
       });
@@ -124,21 +117,9 @@ export class StripeService {
         return { success: true, message: 'Payment already processed' };
       }
       
-      if (product.creditType === 'transcription') {
-        await storage.updateUserCredits(
-          userId,
-          (user.transcriptionCredits || 0) + product.credits,
-          user.analysisCredits || 0
-        );
-      } else {
-        await storage.updateUserCredits(
-          userId,
-          user.transcriptionCredits || 0,
-          (user.analysisCredits || 0) + product.credits
-        );
-      }
+      await storage.addCredits(userId, product.credits);
 
-      return { success: true, creditType: product.creditType, creditsAmount: product.credits };
+      return { success: true, creditsAmount: product.credits };
     } catch (error: any) {
       if (error.code === '23505') {
         console.log('[stripe] Payment already processed (unique constraint)');

@@ -8,7 +8,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { transcribeAudio, analyzeWithBardin } from "./openai";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
-import { ADMIN_EMAIL } from "@shared/schema";
+import { ADMIN_EMAIL, calculateAnalysisCredits, FREE_PLAN_LIMITS } from "@shared/schema";
 
 const upload = multer({
   dest: "/tmp/uploads/",
@@ -114,7 +114,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Check if user can transcribe
       const canUseFreeTrial = !user.freeTranscriptionUsed;
-      const hasCredits = (user.transcriptionCredits || 0) > 0;
+      const hasCredits = (user.credits || 0) > 0;
 
       if (!canUseFreeTrial && !hasCredits) {
         fs.unlinkSync(file.path);
@@ -242,10 +242,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "Missing required fields" });
       }
 
-      // Check if user has analysis credits
-      const hasCredits = (user.analysisCredits || 0) > 0 || !user.freeTranscriptionUsed;
+      // Check if user has credits or free analysis
+      const canUseFreeAnalysis = !user.freeAnalysisUsed;
+      const hasCredits = (user.credits || 0) > 0;
       
-      if (!hasCredits) {
+      if (!canUseFreeAnalysis && !hasCredits) {
         return res.status(403).json({ message: "Sem créditos de análise disponíveis" });
       }
 
@@ -265,18 +266,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         fs.unlinkSync(req.file.path);
       }
 
+      // Calculate pages and credits
+      const transcriptionText = transcription.transcriptionText || "";
+      const textWordCount = transcriptionText.split(/\s+/).filter(Boolean).length;
+      const textPages = Math.ceil(textWordCount / 250);
+      
+      const referenceWordCount = theoreticalFramework.split(/\s+/).filter(Boolean).length;
+      const referencePages = Math.ceil(referenceWordCount / 250);
+
+      // Calculate credits (text from internal transcription is already paid)
+      const { totalCredits } = calculateAnalysisCredits(textPages, referencePages, true);
+      const creditsToDeduct = canUseFreeAnalysis ? 0 : totalCredits;
+
       // Create analysis record
       const analysis = await storage.createAnalysis({
         userId,
         transcriptionId: parseInt(transcriptionId),
         title,
+        inputText: transcriptionText,
+        inputTextPages: textPages,
         theoreticalFramework,
         theoreticalFrameworkFileName: theoreticalFrameworkFileName || null,
+        theoreticalFrameworkPages: referencePages,
+        isFromInternalTranscription: true,
+        creditsUsed: creditsToDeduct,
         status: "processing",
       });
 
       // Process analysis asynchronously
-      processAnalysis(analysis.id, transcription.transcriptionText || "", theoreticalFramework, userId);
+      processAnalysis(analysis.id, transcriptionText, theoreticalFramework, userId, creditsToDeduct, canUseFreeAnalysis);
 
       res.json(analysis);
     } catch (error) {
@@ -325,22 +343,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Create Stripe checkout session
-  const checkoutRequestSchema = z.object({
-    creditType: z.enum(["transcription", "analysis"]),
-  });
-
+  // Create Stripe checkout session for 100 credits (R$35)
   app.post("/api/checkout/create", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
       
-      const parseResult = checkoutRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        return res.status(400).json({ message: "Invalid credit type" });
-      }
-      const { creditType } = parseResult.data;
-
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -358,11 +366,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         await storage.updateUserStripeCustomerId(userId, customer.id);
       }
 
-      // Create checkout session
+      // Create checkout session for 100 credits
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const session = await stripeService.createCheckoutSession(
         stripeCustomerId,
-        creditType as "transcription" | "analysis",
         `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
         `${baseUrl}/checkout/cancel`,
         userId
@@ -389,7 +396,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (result.success) {
         res.json({ 
           success: true, 
-          creditType: result.creditType,
           creditsAmount: result.creditsAmount,
           message: result.message || `Pagamento confirmado! Seus créditos serão adicionados em breve.`
         });
@@ -442,7 +448,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Manual credit addition schema
   const manualCreditSchema = z.object({
     userId: z.string().min(1),
-    creditType: z.enum(["transcription", "analysis"]),
     amount: z.number().int().positive().max(10000),
     reason: z.string().min(1).max(500),
   });
@@ -457,7 +462,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ message: "Invalid request data", errors: parseResult.error.errors });
       }
 
-      const { userId, creditType, amount, reason } = parseResult.data;
+      const { userId, amount, reason } = parseResult.data;
 
       // Verify target user exists
       const targetUser = await storage.getUser(userId);
@@ -466,17 +471,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // Add credits to user
-      const transcriptionCredits = creditType === "transcription" ? amount : 0;
-      const analysisCredits = creditType === "analysis" ? amount : 0;
-      
-      const updatedUser = await storage.addCreditsToUser(userId, transcriptionCredits, analysisCredits);
+      const updatedUser = await storage.addCredits(userId, amount);
 
       // Create manual payment record
       await storage.createManualPayment({
         userId,
         amount: 0,
         currency: "BRL",
-        creditType,
+        creditType: "credits",
         creditsAmount: amount,
         status: "completed",
         source: "manual",
@@ -489,12 +491,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         adminId,
         targetUserId: userId,
         actionType: "manual_credit_add",
-        payload: { creditType, amount, reason },
+        payload: { amount, reason },
       });
 
       res.json({ 
         success: true, 
-        message: `${amount} créditos de ${creditType === "transcription" ? "transcrição" : "análise"} adicionados com sucesso.`,
+        message: `${amount} créditos adicionados com sucesso.`,
         user: updatedUser 
       });
     } catch (error) {
@@ -565,15 +567,8 @@ async function processTranscription(transcriptionId: number, filePath: string, u
     if (useFreeCredit) {
       await storage.markFreeTranscriptionUsed(userId);
     } else {
-      const user = await storage.getUser(userId);
-      if (user && user.transcriptionCredits) {
-        const pagesUsed = Math.min(pageCount, user.transcriptionCredits);
-        await storage.updateUserCredits(
-          userId,
-          user.transcriptionCredits - pagesUsed,
-          user.analysisCredits || 0
-        );
-      }
+      // Deduct credits based on pages (1 page = 1 credit)
+      await storage.deductCredits(userId, pageCount);
     }
 
     // Clean up file
@@ -593,7 +588,7 @@ async function processTranscription(transcriptionId: number, filePath: string, u
   }
 }
 
-async function processAnalysis(analysisId: number, transcriptionText: string, theoreticalFramework: string, userId: string) {
+async function processAnalysis(analysisId: number, transcriptionText: string, theoreticalFramework: string, userId: string, creditsToDeduct: number, useFreeAnalysis: boolean) {
   try {
     // Perform Bardin analysis
     const result = await analyzeWithBardin(transcriptionText, theoreticalFramework);
@@ -609,17 +604,10 @@ async function processAnalysis(analysisId: number, transcriptionText: string, th
     });
 
     // Update user credits
-    const user = await storage.getUser(userId);
-    if (user) {
-      if (!user.freeTranscriptionUsed) {
-        await storage.markFreeTranscriptionUsed(userId);
-      } else if (user.analysisCredits && user.analysisCredits > 0) {
-        await storage.updateUserCredits(
-          userId,
-          user.transcriptionCredits || 0,
-          user.analysisCredits - 1
-        );
-      }
+    if (useFreeAnalysis) {
+      await storage.markFreeAnalysisUsed(userId);
+    } else if (creditsToDeduct > 0) {
+      await storage.deductCredits(userId, creditsToDeduct);
     }
   } catch (error) {
     console.error("Error processing analysis:", error);

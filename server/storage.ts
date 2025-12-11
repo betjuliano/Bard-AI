@@ -23,9 +23,14 @@ export interface IStorage {
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
-  updateUserCredits(userId: string, transcriptionCredits?: number, analysisCredits?: number): Promise<User>;
+  updateUserCredits(userId: string, credits: number): Promise<User>;
   updateUserStripeCustomerId(userId: string, stripeCustomerId: string): Promise<User>;
   markFreeTranscriptionUsed(userId: string): Promise<void>;
+  markFreeAnalysisUsed(userId: string): Promise<void>;
+  updateUserCpf(userId: string, fullName: string, cpf: string): Promise<User>;
+  getUserByCpf(cpf: string): Promise<User | undefined>;
+  deductCredits(userId: string, amount: number): Promise<User>;
+  addCredits(userId: string, amount: number): Promise<User>;
 
   // Transcription operations
   getTranscription(id: number): Promise<Transcription | undefined>;
@@ -57,7 +62,6 @@ export interface IStorage {
   createManualPayment(payment: InsertPayment): Promise<Payment>;
   createAdminAction(action: InsertAdminAction): Promise<AdminAction>;
   getAdminActions(): Promise<AdminAction[]>;
-  addCreditsToUser(userId: string, transcriptionCredits: number, analysisCredits: number): Promise<User>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -85,17 +89,10 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async updateUserCredits(userId: string, transcriptionCredits?: number, analysisCredits?: number): Promise<User> {
-    const updateData: Partial<User> = { updatedAt: new Date() };
-    if (transcriptionCredits !== undefined) {
-      updateData.transcriptionCredits = transcriptionCredits;
-    }
-    if (analysisCredits !== undefined) {
-      updateData.analysisCredits = analysisCredits;
-    }
+  async updateUserCredits(userId: string, credits: number): Promise<User> {
     const [user] = await db
       .update(users)
-      .set(updateData)
+      .set({ credits, updatedAt: new Date() })
       .where(eq(users.id, userId))
       .returning();
     return user;
@@ -106,6 +103,51 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set({ freeTranscriptionUsed: true, updatedAt: new Date() })
       .where(eq(users.id, userId));
+  }
+
+  async markFreeAnalysisUsed(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ freeAnalysisUsed: true, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
+  async updateUserCpf(userId: string, fullName: string, cpf: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ fullName, cpf, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async getUserByCpf(cpf: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.cpf, cpf));
+    return user;
+  }
+
+  async deductCredits(userId: string, amount: number): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({
+        credits: sql`GREATEST(0, ${users.credits} - ${amount})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async addCredits(userId: string, amount: number): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({
+        credits: sql`${users.credits} + ${amount}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
   }
 
   async updateUserStripeCustomerId(userId: string, stripeCustomerId: string): Promise<User> {
@@ -309,18 +351,6 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(adminActions.createdAt));
   }
 
-  async addCreditsToUser(userId: string, transcriptionCredits: number, analysisCredits: number): Promise<User> {
-    const [user] = await db
-      .update(users)
-      .set({
-        transcriptionCredits: sql`${users.transcriptionCredits} + ${transcriptionCredits}`,
-        analysisCredits: sql`${users.analysisCredits} + ${analysisCredits}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId))
-      .returning();
-    return user;
-  }
 }
 
 export const storage = new DatabaseStorage();

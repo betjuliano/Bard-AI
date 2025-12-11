@@ -33,11 +33,13 @@ export const users = pgTable("users", {
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
+  fullName: varchar("full_name"),
+  cpf: varchar("cpf").unique(),
   profileImageUrl: varchar("profile_image_url"),
   stripeCustomerId: varchar("stripe_customer_id"),
   freeTranscriptionUsed: boolean("free_transcription_used").default(false),
-  transcriptionCredits: integer("transcription_credits").default(0),
-  analysisCredits: integer("analysis_credits").default(0),
+  freeAnalysisUsed: boolean("free_analysis_used").default(false),
+  credits: integer("credits").default(0),
   isAdmin: boolean("is_admin").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -79,8 +81,13 @@ export const analyses = pgTable("analyses", {
   userId: varchar("user_id").notNull().references(() => users.id),
   transcriptionId: integer("transcription_id").references(() => transcriptions.id),
   title: varchar("title").notNull(),
+  inputText: text("input_text"),
+  inputTextPages: integer("input_text_pages"),
   theoreticalFramework: text("theoretical_framework"),
   theoreticalFrameworkFileName: varchar("theoretical_framework_file_name"),
+  theoreticalFrameworkPages: integer("theoretical_framework_pages"),
+  isFromInternalTranscription: boolean("is_from_internal_transcription").default(false),
+  creditsUsed: integer("credits_used").default(0),
   analysisResult: text("analysis_result"),
   categories: jsonb("categories"),
   themes: jsonb("themes"),
@@ -140,29 +147,70 @@ export const adminActionsRelations = relations(adminActions, ({ one }) => ({
 
 // Internal product catalog for secure credit mapping - indexed by lookup key
 export const PRODUCT_CATALOG = {
-  transcription_100: {
-    lookupKey: 'transcription_100',
+  credits_100: {
+    lookupKey: 'credits_100',
     priceInCents: 3500,
     credits: 100,
-    creditType: 'transcription' as const,
-    name: 'Pacote Transcrição - 100 páginas',
-    description: '100 páginas de transcrição automática com IA',
-  },
-  analysis_1: {
-    lookupKey: 'analysis_1',
-    priceInCents: 3500,
-    credits: 1,
-    creditType: 'analysis' as const,
-    name: 'Pacote Análise Bardin - 1 análise',
-    description: '1 análise qualitativa completa baseada em Bardin',
+    name: 'Pacote Premium - 100 créditos',
+    description: '100 créditos para transcrições e análises qualitativas',
   },
 } as const;
 
-// Map credit types to lookup keys (server-controlled, not client)
-export const CREDIT_TYPE_TO_LOOKUP_KEY: Record<string, keyof typeof PRODUCT_CATALOG> = {
-  transcription: 'transcription_100',
-  analysis: 'analysis_1',
-};
+// Pricing tiers for transcription
+export const TRANSCRIPTION_PRICING = {
+  creditsPerPage: 1,
+  minutesPerPage: 2,
+  freeMaxFileSizeMB: 10,
+} as const;
+
+// Pricing tiers for qualitative analysis (text size)
+export const ANALYSIS_TEXT_TIERS = [
+  { level: 1, maxPages: 20, credits: 20 },
+  { level: 2, maxPages: 50, credits: 35 },
+  { level: 3, maxPages: 100, credits: 60 },
+  { level: 4, maxPages: 150, credits: 80 },
+] as const;
+
+// Pricing tiers for theoretical framework (reference text)
+export const ANALYSIS_REFERENCE_TIERS = [
+  { level: 'A', maxPages: 10, credits: 5 },
+  { level: 'B', maxPages: 20, credits: 10 },
+  { level: 'C', maxPages: 30, credits: 15 },
+  { level: 'D', maxPages: 50, credits: 25 },
+] as const;
+
+// Free plan limits
+export const FREE_PLAN_LIMITS = {
+  maxTranscriptionFileSizeMB: 10,
+  maxAnalysisTextPages: 10,
+  maxAnalysisReferencePages: 5,
+} as const;
+
+// Helper functions for credit calculation
+export function calculateTranscriptionCredits(durationMinutes: number): { pages: number; credits: number } {
+  const pages = Math.ceil(durationMinutes / TRANSCRIPTION_PRICING.minutesPerPage);
+  const credits = pages * TRANSCRIPTION_PRICING.creditsPerPage;
+  return { pages, credits };
+}
+
+export function calculateAnalysisCredits(textPages: number, referencePages: number, isInternalTranscription: boolean): {
+  textCredits: number;
+  referenceCredits: number;
+  totalCredits: number;
+  textTier: typeof ANALYSIS_TEXT_TIERS[number] | null;
+  referenceTier: typeof ANALYSIS_REFERENCE_TIERS[number] | null;
+} {
+  const textTier = ANALYSIS_TEXT_TIERS.find(tier => textPages <= tier.maxPages) || ANALYSIS_TEXT_TIERS[ANALYSIS_TEXT_TIERS.length - 1];
+  const referenceTier = referencePages > 0 
+    ? ANALYSIS_REFERENCE_TIERS.find(tier => referencePages <= tier.maxPages) || ANALYSIS_REFERENCE_TIERS[ANALYSIS_REFERENCE_TIERS.length - 1]
+    : null;
+  
+  const textCredits = textTier.credits;
+  const referenceCredits = referenceTier?.credits || 0;
+  const totalCredits = textCredits + referenceCredits;
+  
+  return { textCredits, referenceCredits, totalCredits, textTier, referenceTier };
+}
 
 export const paymentsRelations = relations(payments, ({ one }) => ({
   user: one(users, {

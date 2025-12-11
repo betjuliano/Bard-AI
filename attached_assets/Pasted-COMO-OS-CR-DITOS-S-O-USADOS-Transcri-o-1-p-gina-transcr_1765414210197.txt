@@ -1,0 +1,62 @@
+COMO OS CRÉDITOS SÃO USADOS
+Transcrição
+1 página transcrita = 1 crédito
+100 páginas → 100 créditos (pacote inteiro)
+Converte automaticamente tempo de áudio → páginas estimadas:
+Páginas estimadas = minutos_de_áudio / 2
+O sistema mostra algo como:
+“Seu áudio tem aproximadamente 46 minutos → ~23 páginas → 23 créditos.”
+
+Análise Qualitativa (Bardin)
+O usuário seleciona duas coisas:
+A) Tamanho do texto a ser analisado
+(Texto transcrito + texto importado)
+Faixa	Tamanho total	Créditos necessários
+Nível 1	até 20 páginas	20 créditos
+Nível 2	até 50 páginas	35 créditos
+Nível 3	até 100 páginas	60 créditos
+Nível 4	até 150 páginas	80 créditos
+B) Tamanho do referencial teórico base
+(O PDF/TXT enviado pelo usuário para contextualizar a análise)
+Faixa	Tamanho	Créditos
+Nível A	até 10 páginas	5 créditos
+Nível B	até 20 páginas	10 créditos
+Nível C	até 30 páginas	15 créditos
+Nível D	até 50 páginas	25 créditos
+📌 Fórmula final para análise de conteúdo
+Créditos Totais=Créditos(Texto)+Créditos(Referencial)
+Exemplo:
+Texto transcrito = 72 páginas → Nível 3 (60 créditos)
+Referencial teórico = 18 páginas → Nível B (10 créditos)
+Total: 60+10 = 70 créditos
+O usuário precisa ter ≥ 70 créditos para confirmar.
+Observação: Se o texto a ser analisado vem de uma transcrição feita na própria plataforma, o usuário NÃO paga novamente créditos por páginas transcritas.
+Ele paga apenas:
+Créditos da análise qualitativa
+Créditos pelo referencial teórico (se houver) 
+Ou seja, se a transcrição veio de áudio interno: “As páginas da transcrição já foram pagas no processamento do áudio. Portanto, você só usará créditos pela ANÁLISE e, se houver, pelo REFERENCIAL.”
+
+Exemplo:
+O usuário transcreveu 80 páginas (80 créditos).
+Agora quer analisar:
+Texto base = 80 páginas
+Referencial = 18 páginas
+Custo da análise:
+80 páginas → 60 créditos
+Referencial 18 páginas → 10 créditos
+Total = 70 créditos
+Ele NÃO paga novamente pelos 80 créditos de transcrição.
+
+Tela confirmação: exemplo
+Análise Qualitativa – Confirmação de Créditos
+Texto analisado: 80 páginas
+Origem: transcrição interna (já paga)
+→ 0 créditos
+Referencial teórico: 18 páginas
+→ 10 créditos
+Análise Bardin (80 páginas)
+→ 60 créditos
+Total: 70 créditos
+Créditos disponíveis: 100
+❗ “Nenhum crédito adicional foi cobrado pela transcrição, pois ela já foi realizada no sistema.”
+[Confirmar] [Cancelar]
