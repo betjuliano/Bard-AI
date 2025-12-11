@@ -127,10 +127,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deductCredits(userId: string, amount: number): Promise<User> {
+    const existingUser = await this.getUser(userId);
+    if (!existingUser) {
+      throw new Error("User not found");
+    }
+    const currentCredits = existingUser.credits || 0;
+    if (currentCredits < amount) {
+      throw new Error(`Créditos insuficientes. Você tem ${currentCredits} créditos, mas precisa de ${amount}.`);
+    }
     const [user] = await db
       .update(users)
       .set({
-        credits: sql`GREATEST(0, ${users.credits} - ${amount})`,
+        credits: currentCredits - amount,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))

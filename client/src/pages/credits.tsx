@@ -40,8 +40,8 @@ export default function CreditsPage() {
   });
 
   const purchaseMutation = useMutation({
-    mutationFn: async (creditType: "transcription" | "analysis") => {
-      const response = await apiRequest("POST", "/api/checkout/create", { creditType });
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/checkout/create", {});
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -140,126 +140,81 @@ export default function CreditsPage() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card data-testid="card-transcription-credits">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  Transcrições
-                </CardTitle>
-                <Sparkles className="h-5 w-5 text-primary" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-2">{user?.transcriptionCredits || 0}</div>
-              <p className="text-sm text-muted-foreground mb-4">
-                créditos de transcrição
-              </p>
+        <Card data-testid="card-unified-credits">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                Créditos Unificados
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold mb-2">{user?.credits || 0}</div>
+            <p className="text-sm text-muted-foreground mb-4">
+              créditos disponíveis
+            </p>
+            <div className="space-y-2">
               {!user?.freeTranscriptionUsed && (
-                <div className="flex items-center gap-2 p-3 bg-green-500/10 text-green-700 dark:text-green-400 rounded-md mb-4">
+                <div className="flex items-center gap-2 p-3 bg-green-500/10 text-green-700 dark:text-green-400 rounded-md">
                   <Check className="h-4 w-4" />
-                  <span className="text-sm">1 transcrição grátis disponível</span>
+                  <span className="text-sm">1 transcrição grátis disponível (até 10MB)</span>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          <Card data-testid="card-analysis-credits">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  Análises Bardin
-                </CardTitle>
-                <Sparkles className="h-5 w-5 text-primary" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold mb-2">{user?.analysisCredits || 0}</div>
-              <p className="text-sm text-muted-foreground mb-4">
-                créditos de análise
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+              {!user?.freeAnalysisUsed && (
+                <div className="flex items-center gap-2 p-3 bg-green-500/10 text-green-700 dark:text-green-400 rounded-md">
+                  <Check className="h-4 w-4" />
+                  <span className="text-sm">1 análise grátis disponível (até 10 páginas)</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
             <CardTitle>Comprar Créditos</CardTitle>
             <CardDescription>
-              Pacote único de R$ 35,00 - escolha entre transcrição ou análise
+              Pacote único de R$ 35,00 = 100 créditos unificados
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="border rounded-lg p-6 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-12 w-12 rounded-md bg-primary/10">
-                    <FileText className="h-6 w-6 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">Pacote Transcrição</h3>
-                    <p className="text-2xl font-bold">R$ 35</p>
-                  </div>
+            <div className="max-w-md mx-auto border rounded-lg p-6 space-y-4 border-primary">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center h-12 w-12 rounded-md bg-primary/10">
+                  <Sparkles className="h-6 w-6 text-primary" />
                 </div>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    100 páginas transcritas
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    Arquivos MP3, WAV, M4A
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    Exportação TXT e DOCX
-                  </li>
-                </ul>
-                <Button 
-                  className="w-full" 
-                  onClick={() => purchaseMutation.mutate("transcription")}
-                  disabled={purchaseMutation.isPending}
-                  data-testid="button-buy-transcription"
-                >
-                  {purchaseMutation.isPending ? "Processando..." : "Comprar Transcrição"}
-                </Button>
-              </div>
-
-              <div className="border rounded-lg p-6 space-y-4 border-primary">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-12 w-12 rounded-md bg-primary/10">
-                    <Brain className="h-6 w-6 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">Pacote Análise</h3>
-                    <p className="text-2xl font-bold">R$ 35</p>
-                  </div>
+                <div>
+                  <h3 className="font-semibold">100 Créditos</h3>
+                  <p className="text-2xl font-bold">R$ 35</p>
                 </div>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    1 análise qualitativa completa
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    Metodologia Bardin
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    Upload de referencial teórico
-                  </li>
-                </ul>
-                <Button 
-                  className="w-full" 
-                  onClick={() => purchaseMutation.mutate("analysis")}
-                  disabled={purchaseMutation.isPending}
-                  data-testid="button-buy-analysis"
-                >
-                  {purchaseMutation.isPending ? "Processando..." : "Comprar Análise"}
-                </Button>
               </div>
+              <ul className="space-y-2 text-sm">
+                <li className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span><strong>Transcrição:</strong> 1 crédito por página (1 página = 2 min de áudio)</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-muted-foreground" />
+                  <span><strong>Análise:</strong> 20-80 créditos conforme tamanho do texto</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-green-600" />
+                  Créditos unificados para qualquer serviço
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-green-600" />
+                  Créditos não expiram
+                </li>
+              </ul>
+              <Button 
+                className="w-full" 
+                onClick={() => purchaseMutation.mutate()}
+                disabled={purchaseMutation.isPending}
+                data-testid="button-buy-credits"
+              >
+                {purchaseMutation.isPending ? "Processando..." : "Comprar 100 Créditos"}
+              </Button>
             </div>
 
             <div className="flex items-center justify-center gap-2 mt-6 text-sm text-muted-foreground">
@@ -292,17 +247,11 @@ export default function CreditsPage() {
                 {payments.map((payment) => (
                   <div key={payment.id} className="flex items-center gap-4 p-3 bg-muted/50 rounded-md">
                     <div className="flex items-center justify-center h-10 w-10 rounded-md bg-background">
-                      {payment.creditType === "transcription" ? (
-                        <FileText className="h-5 w-5 text-muted-foreground" />
-                      ) : (
-                        <Brain className="h-5 w-5 text-muted-foreground" />
-                      )}
+                      <Sparkles className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium">
-                        {payment.creditType === "transcription"
-                          ? "Pacote Transcrição"
-                          : "Pacote Análise"}
+                        {payment.creditsAmount} Créditos
                       </div>
                       <div className="text-sm text-muted-foreground flex items-center gap-2">
                         <Clock className="h-3 w-3" />

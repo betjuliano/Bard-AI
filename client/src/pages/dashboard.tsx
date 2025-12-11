@@ -102,7 +102,7 @@ export default function Dashboard() {
             <Link href="/creditos">
               <Button variant="outline" size="sm" className="gap-2" data-testid="button-credits">
                 <Sparkles className="h-4 w-4" />
-                <span className="font-semibold">{user?.transcriptionCredits || 0}</span>
+                <span className="font-semibold">{user?.credits || 0}</span>
                 <span className="text-muted-foreground">créditos</span>
               </Button>
             </Link>
@@ -164,9 +164,15 @@ export default function Dashboard() {
               <Sparkles className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{user?.transcriptionCredits || 0}</div>
+              <div className="text-3xl font-bold">{user?.credits || 0}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {user?.freeTranscriptionUsed ? "Teste gratuito utilizado" : "1 transcrição grátis disponível"}
+                {user?.freeTranscriptionUsed && user?.freeAnalysisUsed 
+                  ? "Testes gratuitos utilizados" 
+                  : !user?.freeTranscriptionUsed && !user?.freeAnalysisUsed 
+                    ? "1 transcrição e 1 análise grátis" 
+                    : !user?.freeTranscriptionUsed 
+                      ? "1 transcrição grátis disponível"
+                      : "1 análise grátis disponível"}
               </p>
               <Button className="mt-4 w-full" variant="outline" asChild>
                 <Link href="/creditos">Comprar Créditos</Link>
