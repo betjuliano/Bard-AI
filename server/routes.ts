@@ -19,7 +19,8 @@ const upload = multer({
     const isAudioOrVideo = 
       file.mimetype.startsWith("audio/") || 
       file.mimetype.startsWith("video/") ||
-      file.mimetype === "application/octet-stream"; // Some files come as generic binary
+      file.mimetype === "application/octet-stream" || // Some files come as generic binary
+      file.mimetype === "application/ogg"; // OGG files often have this MIME type
     
     // Also accept PDF and text for analysis
     const isDocument = 
