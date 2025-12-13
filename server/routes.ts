@@ -14,26 +14,31 @@ const upload = multer({
   dest: "/tmp/uploads/",
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
   fileFilter: (req, file, cb) => {
-    const allowedMimes = [
-      "audio/mpeg",
-      "audio/wav",
-      "audio/x-m4a",
-      "audio/mp4",
-      "audio/x-wav",
-      "audio/ogg",
-      "audio/webm",
-      "audio/flac",
-      "audio/aac",
-      "video/mp4",
-      "video/webm",
-      "video/ogg",
-      "application/pdf",
-      "text/plain",
+    // Accept any audio or video format - ffmpeg will convert as needed
+    const isAudioOrVideo = 
+      file.mimetype.startsWith("audio/") || 
+      file.mimetype.startsWith("video/") ||
+      file.mimetype === "application/octet-stream"; // Some files come as generic binary
+    
+    // Also accept PDF and text for analysis
+    const isDocument = 
+      file.mimetype === "application/pdf" || 
+      file.mimetype === "text/plain";
+    
+    // Check file extension as fallback for unknown MIME types
+    const audioVideoExtensions = [
+      ".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".webm", ".flac", ".aac",
+      ".wma", ".amr", ".opus", ".3gp", ".3gpp", ".mov", ".avi", ".mkv",
+      ".wmv", ".aiff", ".aif", ".caf", ".m4b", ".m4r", ".ra", ".rm",
+      ".mid", ".midi", ".mka", ".mts", ".ts", ".vob", ".mpeg", ".mpg"
     ];
-    if (allowedMimes.includes(file.mimetype)) {
+    const ext = "." + (file.originalname.split(".").pop()?.toLowerCase() || "");
+    const hasAudioVideoExtension = audioVideoExtensions.includes(ext);
+    
+    if (isAudioOrVideo || isDocument || hasAudioVideoExtension) {
       cb(null, true);
     } else {
-      cb(new Error("Formato de arquivo não suportado"));
+      cb(new Error("Formato de arquivo não suportado. Envie um arquivo de áudio ou vídeo."));
     }
   },
 });
