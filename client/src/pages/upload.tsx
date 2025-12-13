@@ -44,7 +44,7 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const canUseFreeTrial = !user?.freeTranscriptionUsed;
-  const hasCredits = (user?.transcriptionCredits || 0) > 0;
+  const hasCredits = (user?.credits || 0) > 0;
   const canTranscribe = canUseFreeTrial || hasCredits;
 
   const getInitials = (firstName?: string | null, lastName?: string | null) => {
@@ -178,7 +178,7 @@ export default function UploadPage() {
             <Link href="/creditos">
               <Button variant="outline" size="sm" className="gap-2">
                 <Sparkles className="h-4 w-4" />
-                <span className="font-semibold">{user?.transcriptionCredits || 0}</span>
+                <span className="font-semibold">{user?.credits || 0}</span>
                 <span className="text-muted-foreground">créditos</span>
               </Button>
             </Link>
@@ -253,7 +253,7 @@ export default function UploadPage() {
             <CardHeader>
               <CardTitle>Upload de Áudio</CardTitle>
               <CardDescription>
-                Formatos aceitos: MP3, WAV, M4A
+                Qualquer formato de áudio ou vídeo (MP3, WAV, M4A, OGG, WebM, MP4, etc.)
                 {canUseFreeTrial && " • Máximo 10MB para teste gratuito"}
               </CardDescription>
             </CardHeader>
@@ -284,7 +284,7 @@ export default function UploadPage() {
                   <Input
                     id="file-upload"
                     type="file"
-                    accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-m4a"
+                    accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.webm,.mp4,.flac,.aac,.wma,.amr,.opus,.3gp,.mov,.avi,.mkv"
                     className="hidden"
                     onChange={(e) => {
                       if (e.target.files?.[0]) {
