@@ -5,7 +5,8 @@ import fs from "fs";
 import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { transcribeAudio, analyzeWithBardin } from "./openai";
+import { transcribeAudio, analyzeWithBardin, prepareAudioChunks, transcribeSingleChunk, cleanupChunks } from "./openai";
+import type { TranscriptionChunkProgress, TranscriptionSegment } from "@shared/schema";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
 import { ADMIN_EMAIL, calculateAnalysisCredits, FREE_PLAN_LIMITS } from "@shared/schema";
@@ -141,17 +142,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      // Premium quality uses WAV for paying users
+      const isPremiumQuality = hasCredits && !canUseFreeTrial;
+
       // Create transcription record
       const transcription = await storage.createTranscription({
         userId,
         title,
         originalFileName: file.originalname,
         fileSize,
-        status: "processing",
+        status: "preparing",
+        isPremiumQuality,
       });
 
-      // Process transcription asynchronously
-      processTranscription(transcription.id, file.path, userId, canUseFreeTrial);
+      // Process transcription asynchronously with premium or standard quality
+      processTranscriptionProgressive(transcription.id, file.path, userId, canUseFreeTrial, isPremiumQuality);
 
       res.json(transcription);
     } catch (error) {
@@ -591,21 +596,81 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 }
 
-// Background processing functions
-async function processTranscription(transcriptionId: number, filePath: string, userId: string, useFreeCredit: boolean) {
+// Background processing functions - Progressive transcription with chunk tracking
+async function processTranscriptionProgressive(
+  transcriptionId: number, 
+  filePath: string, 
+  userId: string, 
+  useFreeCredit: boolean,
+  isPremiumQuality: boolean
+) {
+  let convertedPath: string | null = null;
+  let chunks: { path: string; startOffset: number }[] = [];
+  
   try {
-    // Transcribe audio
-    const result = await transcribeAudio(filePath);
+    // Prepare audio chunks (WAV for premium, MP3 for free)
+    console.log(`Preparing audio for transcription ${transcriptionId}, premium: ${isPremiumQuality}`);
+    const prepared = await prepareAudioChunks(filePath, isPremiumQuality);
+    convertedPath = prepared.convertedPath;
+    chunks = prepared.chunks;
+    
+    // Initialize chunk progress
+    const chunkProgress: TranscriptionChunkProgress[] = chunks.map((chunk, i) => ({
+      chunkIndex: i,
+      totalChunks: chunks.length,
+      status: "pending" as const,
+      startOffset: chunk.startOffset,
+    }));
+    
+    await storage.updateTranscription(transcriptionId, {
+      status: "processing",
+      duration: Math.round(prepared.duration),
+      totalChunks: chunks.length,
+      completedChunks: 0,
+      chunkProgress,
+    });
+    
+    // Process each chunk
+    let fullText = "";
+    let allSegments: TranscriptionSegment[] = [];
+    
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`Transcribing chunk ${i + 1}/${chunks.length} for transcription ${transcriptionId}`);
+      
+      // Mark chunk as processing
+      await storage.updateChunkProgress(transcriptionId, i, { status: "processing" });
+      
+      try {
+        const result = await transcribeSingleChunk(chunks[i].path, chunks[i].startOffset);
+        
+        fullText += (fullText ? " " : "") + result.text;
+        allSegments = allSegments.concat(result.segments);
+        
+        // Mark chunk as completed with text
+        await storage.updateChunkProgress(transcriptionId, i, { 
+          status: "completed",
+          text: result.text,
+          segments: result.segments,
+        });
+        
+      } catch (chunkError: any) {
+        console.error(`Error transcribing chunk ${i}:`, chunkError);
+        await storage.updateChunkProgress(transcriptionId, i, { 
+          status: "error",
+          error: chunkError.message,
+        });
+        throw chunkError;
+      }
+    }
     
     // Calculate word and page count
-    const wordCount = result.text.split(/\s+/).filter(Boolean).length;
-    const pageCount = Math.ceil(wordCount / 250); // ~250 words per page
+    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+    const pageCount = Math.ceil(wordCount / 250);
 
-    // Update transcription with segments
+    // Update transcription with final result
     await storage.updateTranscription(transcriptionId, {
-      transcriptionText: result.text,
-      segments: result.segments,
-      duration: result.duration,
+      transcriptionText: fullText,
+      segments: allSegments,
       wordCount,
       pageCount,
       status: "completed",
@@ -616,24 +681,22 @@ async function processTranscription(transcriptionId: number, filePath: string, u
     if (useFreeCredit) {
       await storage.markFreeTranscriptionUsed(userId);
     } else {
-      // Deduct credits based on pages (1 page = 1 credit)
       await storage.deductCredits(userId, pageCount);
     }
 
-    // Clean up file
-    fs.unlinkSync(filePath);
+    // Clean up files
+    cleanupChunks(convertedPath, chunks, filePath);
+    try { fs.unlinkSync(filePath); } catch (e) {}
+    
   } catch (error) {
     console.error("Error processing transcription:", error);
     await storage.updateTranscription(transcriptionId, {
       status: "error",
     });
     
-    // Clean up file
-    try {
-      fs.unlinkSync(filePath);
-    } catch (e) {
-      // Ignore cleanup errors
-    }
+    // Clean up files
+    if (convertedPath) cleanupChunks(convertedPath, chunks, filePath);
+    try { fs.unlinkSync(filePath); } catch (e) {}
   }
 }
 

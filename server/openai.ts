@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
-import type { TranscriptionSegment } from "@shared/schema";
+import type { TranscriptionSegment, TranscriptionChunkProgress } from "@shared/schema";
 
 const execAsync = promisify(exec);
 
@@ -11,6 +11,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const CHUNK_DURATION_SECONDS = 600;
 const MAX_FILE_SIZE_MB = 25;
+const PREMIUM_MAX_CHUNK_SIZE_MB = 5;
 
 async function getAudioDuration(filePath: string): Promise<number> {
   try {
@@ -42,6 +43,94 @@ async function convertToMp3(inputPath: string): Promise<string> {
   );
   
   return outputPath;
+}
+
+async function convertToWav(inputPath: string): Promise<string> {
+  const outputPath = inputPath.replace(/\.[^/.]+$/, "_converted.wav");
+  
+  await execAsync(
+    `ffmpeg -i "${inputPath}" -vn -acodec pcm_s16le -ar 16000 -ac 1 -y "${outputPath}"`
+  );
+  
+  return outputPath;
+}
+
+async function splitWavBySize(filePath: string, maxSizeMB: number): Promise<{ path: string; startOffset: number }[]> {
+  const stats = fs.statSync(filePath);
+  const fileSizeMB = stats.size / (1024 * 1024);
+  
+  if (fileSizeMB <= maxSizeMB) {
+    return [{ path: filePath, startOffset: 0 }];
+  }
+  
+  const duration = await getAudioDuration(filePath);
+  const bytesPerSecond = stats.size / duration;
+  const maxBytes = maxSizeMB * 1024 * 1024;
+  const chunkDuration = Math.floor(maxBytes / bytesPerSecond);
+  
+  const chunks: { path: string; startOffset: number }[] = [];
+  const baseName = filePath.replace(/\.[^/.]+$/, "");
+  const numChunks = Math.ceil(duration / chunkDuration);
+  
+  for (let i = 0; i < numChunks; i++) {
+    const startTime = i * chunkDuration;
+    const chunkPath = `${baseName}_chunk${i}.wav`;
+    
+    await execAsync(
+      `ffmpeg -i "${filePath}" -ss ${startTime} -t ${chunkDuration} -acodec pcm_s16le -ar 16000 -ac 1 -y "${chunkPath}"`
+    );
+    
+    chunks.push({ path: chunkPath, startOffset: startTime });
+  }
+  
+  return chunks;
+}
+
+export async function prepareAudioChunks(audioFilePath: string, isPremium: boolean): Promise<{
+  chunks: { path: string; startOffset: number }[];
+  duration: number;
+  convertedPath: string;
+}> {
+  let convertedPath: string;
+  
+  if (isPremium) {
+    convertedPath = await convertToWav(audioFilePath);
+    const duration = await getAudioDuration(convertedPath);
+    const chunks = await splitWavBySize(convertedPath, PREMIUM_MAX_CHUNK_SIZE_MB);
+    return { chunks, duration, convertedPath };
+  } else {
+    convertedPath = await convertToMp3(audioFilePath);
+    const duration = await getAudioDuration(convertedPath);
+    const stats = fs.statSync(convertedPath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    
+    let chunks: { path: string; startOffset: number }[];
+    if (duration > CHUNK_DURATION_SECONDS || fileSizeMB > MAX_FILE_SIZE_MB) {
+      chunks = await splitAudioIntoChunks(convertedPath, CHUNK_DURATION_SECONDS);
+    } else {
+      chunks = [{ path: convertedPath, startOffset: 0 }];
+    }
+    
+    return { chunks, duration, convertedPath };
+  }
+}
+
+export async function transcribeSingleChunk(
+  chunkPath: string, 
+  startOffset: number
+): Promise<{ text: string; segments: TranscriptionSegment[] }> {
+  return transcribeChunkWithTimestamps(chunkPath, startOffset);
+}
+
+export function cleanupChunks(convertedPath: string, chunks: { path: string }[], originalPath: string) {
+  if (convertedPath && convertedPath !== originalPath && fs.existsSync(convertedPath)) {
+    try { fs.unlinkSync(convertedPath); } catch (e) {}
+  }
+  for (const chunk of chunks) {
+    if (chunk.path !== convertedPath && fs.existsSync(chunk.path)) {
+      try { fs.unlinkSync(chunk.path); } catch (e) {}
+    }
+  }
 }
 
 async function splitAudioIntoChunks(filePath: string, chunkDuration: number): Promise<{ path: string; startOffset: number }[]> {

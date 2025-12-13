@@ -59,6 +59,17 @@ export type TranscriptionSegment = {
   speaker?: string;
 };
 
+// Transcription chunk progress type
+export type TranscriptionChunkProgress = {
+  chunkIndex: number;
+  totalChunks: number;
+  status: "pending" | "processing" | "completed" | "error";
+  text?: string;
+  segments?: TranscriptionSegment[];
+  startOffset: number;
+  error?: string;
+};
+
 // Transcriptions table
 export const transcriptions = pgTable("transcriptions", {
   id: serial("id").primaryKey(),
@@ -72,6 +83,10 @@ export const transcriptions = pgTable("transcriptions", {
   wordCount: integer("word_count"),
   pageCount: integer("page_count"),
   status: varchar("status").notNull().default("pending"),
+  isPremiumQuality: boolean("is_premium_quality").default(false),
+  totalChunks: integer("total_chunks"),
+  completedChunks: integer("completed_chunks").default(0),
+  chunkProgress: jsonb("chunk_progress").$type<TranscriptionChunkProgress[]>(),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

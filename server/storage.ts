@@ -15,6 +15,7 @@ import {
   type InsertPayment,
   type AdminAction,
   type InsertAdminAction,
+  type TranscriptionChunkProgress,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, ilike, or, ne, sql } from "drizzle-orm";
@@ -37,6 +38,7 @@ export interface IStorage {
   getTranscriptionsByUser(userId: string): Promise<Transcription[]>;
   createTranscription(transcription: InsertTranscription): Promise<Transcription>;
   updateTranscription(id: number, updates: Partial<Transcription>): Promise<Transcription>;
+  updateChunkProgress(id: number, chunkIndex: number, progress: Partial<TranscriptionChunkProgress>): Promise<Transcription>;
   deleteTranscription(id: number): Promise<void>;
   searchTranscriptions(userId: string, query: string): Promise<Transcription[]>;
 
@@ -199,6 +201,25 @@ export class DatabaseStorage implements IStorage {
       .where(eq(transcriptions.id, id))
       .returning();
     return transcription;
+  }
+
+  async updateChunkProgress(id: number, chunkIndex: number, progress: Partial<TranscriptionChunkProgress>): Promise<Transcription> {
+    const transcription = await this.getTranscription(id);
+    if (!transcription) throw new Error("Transcription not found");
+    
+    const chunkProgress = (transcription.chunkProgress || []) as TranscriptionChunkProgress[];
+    if (chunkProgress[chunkIndex]) {
+      chunkProgress[chunkIndex] = { ...chunkProgress[chunkIndex], ...progress };
+    }
+    
+    const completedChunks = chunkProgress.filter(c => c.status === "completed").length;
+    
+    const [updated] = await db
+      .update(transcriptions)
+      .set({ chunkProgress, completedChunks })
+      .where(eq(transcriptions.id, id))
+      .returning();
+    return updated;
   }
 
   async deleteTranscription(id: number): Promise<void> {
