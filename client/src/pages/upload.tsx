@@ -32,7 +32,13 @@ import {
 import { Link } from "wouter";
 
 const MAX_FREE_SIZE = 10 * 1024 * 1024; // 10MB
-const ACCEPTED_FORMATS = ["audio/mpeg", "audio/wav", "audio/x-m4a", "audio/mp4", "audio/x-wav"];
+const ACCEPTED_FORMATS = [
+  "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/mp4", "audio/x-wav",
+  "audio/ogg", "application/ogg", "audio/webm", "audio/flac", "audio/aac",
+  "audio/x-aac", "audio/amr", "audio/opus", "audio/3gpp", "audio/3gpp2",
+  "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo",
+  "video/x-matroska", "video/3gpp", "video/3gpp2", "audio/m4a", "audio/x-flac",
+];
 
 export default function UploadPage() {
   const { user } = useAuth();
@@ -113,10 +119,21 @@ export default function UploadPage() {
   }, []);
 
   const handleFile = (selectedFile: File) => {
-    if (!ACCEPTED_FORMATS.includes(selectedFile.type)) {
+    const audioVideoExtensions = [
+      ".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".webm", ".flac", ".aac",
+      ".wma", ".amr", ".opus", ".3gp", ".3gpp", ".mov", ".avi", ".mkv",
+      ".wmv", ".aiff", ".aif", ".caf", ".m4b", ".m4r"
+    ];
+    const ext = "." + (selectedFile.name.split(".").pop()?.toLowerCase() || "");
+    const hasValidExtension = audioVideoExtensions.includes(ext);
+    const hasValidMimeType = ACCEPTED_FORMATS.includes(selectedFile.type) || 
+      selectedFile.type.startsWith("audio/") || 
+      selectedFile.type.startsWith("video/");
+    
+    if (!hasValidExtension && !hasValidMimeType) {
       toast({
-        title: "Formato inválido",
-        description: "Por favor, envie um arquivo MP3, WAV ou M4A.",
+        title: "Formato invalido",
+        description: "Por favor, envie um arquivo de audio ou video (MP3, WAV, OGG, M4A, etc.).",
         variant: "destructive",
       });
       return;
