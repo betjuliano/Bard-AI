@@ -206,6 +206,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Save edited transcription
+  app.put("/api/transcriptions/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const transcription = await storage.getTranscription(id);
+      
+      if (!transcription || transcription.userId !== req.user.claims.sub) {
+        return res.status(404).json({ message: "Transcription not found" });
+      }
+
+      const { transcriptionText, segments } = req.body;
+
+      if (!transcriptionText || typeof transcriptionText !== "string") {
+        return res.status(400).json({ message: "Invalid transcription text" });
+      }
+
+      // Recalculate word and page count
+      const wordCount = transcriptionText.split(/\s+/).filter(Boolean).length;
+      const pageCount = Math.ceil(wordCount / 250);
+
+      await storage.updateTranscription(id, {
+        transcriptionText,
+        segments: segments || transcription.segments,
+        wordCount,
+        pageCount,
+      });
+
+      const updated = await storage.getTranscription(id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating transcription:", error);
+      res.status(500).json({ message: "Failed to update transcription" });
+    }
+  });
+
   // Analysis routes
   app.get("/api/analyses", isAuthenticated, async (req: any, res) => {
     try {
@@ -561,9 +596,11 @@ async function processTranscription(transcriptionId: number, filePath: string, u
     const wordCount = result.text.split(/\s+/).filter(Boolean).length;
     const pageCount = Math.ceil(wordCount / 250); // ~250 words per page
 
-    // Update transcription
+    // Update transcription with segments
     await storage.updateTranscription(transcriptionId, {
       transcriptionText: result.text,
+      segments: result.segments,
+      duration: result.duration,
       wordCount,
       pageCount,
       status: "completed",

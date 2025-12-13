@@ -51,6 +51,14 @@ export const usersRelations = relations(users, ({ many }) => ({
   payments: many(payments),
 }));
 
+// Transcription segment type for timestamps
+export type TranscriptionSegment = {
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+};
+
 // Transcriptions table
 export const transcriptions = pgTable("transcriptions", {
   id: serial("id").primaryKey(),
@@ -60,6 +68,7 @@ export const transcriptions = pgTable("transcriptions", {
   fileSize: integer("file_size").notNull(),
   duration: integer("duration"),
   transcriptionText: text("transcription_text"),
+  segments: jsonb("segments").$type<TranscriptionSegment[]>(),
   wordCount: integer("word_count"),
   pageCount: integer("page_count"),
   status: varchar("status").notNull().default("pending"),
