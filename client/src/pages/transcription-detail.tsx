@@ -38,7 +38,9 @@ import {
   User,
   Mic,
 } from "lucide-react";
-import type { Transcription, TranscriptionSegment } from "@shared/schema";
+import { Progress } from "@/components/ui/progress";
+import type { Transcription, TranscriptionSegment, TranscriptionChunkProgress } from "@shared/schema";
+import { CheckCircle2, Circle, AlertCircle } from "lucide-react";
 
 function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -165,7 +167,7 @@ export default function TranscriptionDetailPage() {
     queryKey: ["/api/transcriptions", id],
     refetchInterval: (query) => {
       const data = query.state.data as Transcription | undefined;
-      return data?.status === "processing" ? 3000 : false;
+      return data?.status === "processing" ? 2000 : false;
     },
   });
 
@@ -448,12 +450,62 @@ export default function TranscriptionDetailPage() {
           </CardHeader>
           <CardContent>
             {transcription.status === "processing" ? (
-              <div className="flex flex-col items-center justify-center py-16">
+              <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-12 w-12 text-primary animate-spin mb-4" />
                 <h3 className="text-lg font-semibold mb-2">Processando transcricao...</h3>
-                <p className="text-muted-foreground text-center max-w-md">
-                  Sua transcricao esta sendo processada. Isso pode levar alguns minutos dependendo do tamanho do arquivo.
-                </p>
+                {transcription.totalChunks && transcription.totalChunks > 1 ? (
+                  <div className="w-full max-w-md space-y-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Progresso</span>
+                      <span className="font-medium" data-testid="text-progress">
+                        {transcription.completedChunks || 0} de {transcription.totalChunks} partes
+                      </span>
+                    </div>
+                    <Progress 
+                      value={((transcription.completedChunks || 0) / transcription.totalChunks) * 100} 
+                      className="h-2"
+                      data-testid="progress-bar"
+                    />
+                    {transcription.chunkProgress && transcription.chunkProgress.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-xs text-muted-foreground mb-2">Detalhes por parte:</p>
+                        <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-2">
+                          {(transcription.chunkProgress as TranscriptionChunkProgress[]).map((chunk, idx) => (
+                            <div 
+                              key={idx}
+                              className="flex flex-col items-center justify-center"
+                              title={`Parte ${idx + 1}: ${chunk.status}`}
+                              data-testid={`chunk-status-${idx}`}
+                            >
+                              {chunk.status === "completed" ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              ) : chunk.status === "processing" ? (
+                                <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                              ) : chunk.status === "error" ? (
+                                <AlertCircle className="h-5 w-5 text-destructive" />
+                              ) : (
+                                <Circle className="h-5 w-5 text-muted-foreground/50" />
+                              )}
+                              <span className="text-[10px] text-muted-foreground mt-0.5">{idx + 1}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {transcription.isPremiumQuality && (
+                      <div className="flex items-center justify-center gap-2 mt-4">
+                        <Badge variant="secondary" className="gap-1">
+                          <Sparkles className="h-3 w-3" />
+                          Qualidade Premium
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center max-w-md">
+                    Sua transcricao esta sendo processada. Isso pode levar alguns minutos dependendo do tamanho do arquivo.
+                  </p>
+                )}
               </div>
             ) : transcription.status === "error" ? (
               <div className="text-center py-12">
