@@ -67,20 +67,44 @@ export default function UploadPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (formData: FormData) => {
-      const response = await fetch("/api/transcriptions/upload", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percentComplete);
+          }
+        });
+        
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              resolve(data);
+            } catch {
+              reject(new Error("Erro ao processar resposta"));
+            }
+          } else {
+            try {
+              const error = JSON.parse(xhr.responseText);
+              reject(new Error(error.message || "Erro ao fazer upload"));
+            } catch {
+              reject(new Error("Erro ao fazer upload"));
+            }
+          }
+        });
+        
+        xhr.addEventListener("error", () => {
+          reject(new Error("Erro de conexao"));
+        });
+        
+        xhr.open("POST", "/api/transcriptions/upload");
+        xhr.withCredentials = true;
+        xhr.send(formData);
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Erro ao fazer upload");
-      }
-
-      return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data: { id: number }) => {
       toast({
         title: "Upload realizado",
         description: "Sua transcrição está sendo processada.",
@@ -88,6 +112,7 @@ export default function UploadPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/transcriptions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       setLocation(`/transcricoes/${data.id}`);
+      setUploadProgress(0);
     },
     onError: (error: Error) => {
       toast({
@@ -336,10 +361,20 @@ export default function UploadPage() {
                   </div>
 
                   {uploadMutation.isPending && (
-                    <div className="mt-4 space-y-2">
-                      <Progress value={uploadProgress} />
-                      <p className="text-sm text-muted-foreground text-center">
-                        Processando transcrição...
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {uploadProgress < 100 ? "Enviando arquivo..." : "Aguardando processamento..."}
+                        </span>
+                        <span className="font-medium" data-testid="text-upload-progress">
+                          {uploadProgress}%
+                        </span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" data-testid="progress-upload" />
+                      <p className="text-xs text-muted-foreground text-center">
+                        {uploadProgress < 100 
+                          ? "Fazendo upload do seu arquivo de audio..." 
+                          : "Upload concluido! Iniciando transcricao..."}
                       </p>
                     </div>
                   )}
