@@ -248,22 +248,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "Transcription not found" });
       }
 
-      const { transcriptionText, segments } = req.body;
+      const { transcriptionText, segments, title } = req.body;
 
-      if (!transcriptionText || typeof transcriptionText !== "string") {
-        return res.status(400).json({ message: "Invalid transcription text" });
+      // Build updates object
+      const updates: Record<string, any> = {};
+
+      // Handle title update
+      if (title !== undefined) {
+        if (typeof title !== "string" || title.trim().length === 0) {
+          return res.status(400).json({ message: "Invalid title" });
+        }
+        updates.title = title.trim();
       }
 
-      // Recalculate word and page count
-      const wordCount = transcriptionText.split(/\s+/).filter(Boolean).length;
-      const pageCount = Math.ceil(wordCount / 250);
+      // Handle transcription text update
+      if (transcriptionText !== undefined) {
+        if (typeof transcriptionText !== "string") {
+          return res.status(400).json({ message: "Invalid transcription text" });
+        }
+        updates.transcriptionText = transcriptionText;
+        
+        // Recalculate word and page count
+        const wordCount = transcriptionText.split(/\s+/).filter(Boolean).length;
+        const pageCount = Math.ceil(wordCount / 250);
+        updates.wordCount = wordCount;
+        updates.pageCount = pageCount;
+      }
 
-      await storage.updateTranscription(id, {
-        transcriptionText,
-        segments: segments || transcription.segments,
-        wordCount,
-        pageCount,
-      });
+      // Handle segments update
+      if (segments !== undefined) {
+        updates.segments = segments;
+      }
+
+      // Ensure there's something to update
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid updates provided" });
+      }
+
+      await storage.updateTranscription(id, updates);
 
       const updated = await storage.getTranscription(id);
       res.json(updated);

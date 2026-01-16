@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,9 +10,21 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +33,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   FileAudio,
   ArrowLeft,
@@ -37,6 +54,11 @@ import {
   X,
   User,
   Mic,
+  Trash2,
+  Copy,
+  Check,
+  Pencil,
+  Type,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import type { Transcription, TranscriptionSegment, TranscriptionChunkProgress } from "@shared/schema";
@@ -67,9 +89,10 @@ interface SegmentEditorProps {
   isEditing: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
+  onCopy: (text: string) => void;
 }
 
-function SegmentEditor({ segment, index, onUpdate, isEditing, onStartEdit, onCancelEdit }: SegmentEditorProps) {
+function SegmentEditor({ segment, index, onUpdate, isEditing, onStartEdit, onCancelEdit, onCopy }: SegmentEditorProps) {
   const [editText, setEditText] = useState(segment.text);
 
   useEffect(() => {
@@ -83,6 +106,15 @@ function SegmentEditor({ segment, index, onUpdate, isEditing, onStartEdit, onCan
   const handleCancel = () => {
     setEditText(segment.text);
     onCancelEdit();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      handleCancel();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      handleSave();
+    }
   };
 
   const getSpeakerIcon = (speaker?: string) => {
@@ -123,28 +155,49 @@ function SegmentEditor({ segment, index, onUpdate, isEditing, onStartEdit, onCan
               <Textarea
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={handleKeyDown}
                 className="min-h-[80px] text-sm"
                 data-testid={`textarea-segment-${index}`}
+                autoFocus
               />
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={handleSave} data-testid={`button-save-segment-${index}`}>
-                  <Save className="mr-1 h-3 w-3" />
-                  Salvar
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleCancel}>
-                  <X className="mr-1 h-3 w-3" />
-                  Cancelar
-                </Button>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={handleSave} data-testid={`button-save-segment-${index}`}>
+                    <Save className="mr-1 h-3 w-3" />
+                    Salvar
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleCancel}>
+                    <X className="mr-1 h-3 w-3" />
+                    Cancelar
+                  </Button>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {editText.split(/\s+/).filter(Boolean).length} palavras
+                </span>
               </div>
             </div>
           ) : (
-            <div 
-              className="text-sm leading-relaxed cursor-pointer hover-elevate rounded p-2 -m-2"
-              onClick={onStartEdit}
-              data-testid={`text-segment-${index}`}
-            >
-              {segment.text}
-              <Edit3 className="h-3 w-3 ml-2 inline-block opacity-0 group-hover:opacity-50 transition-opacity" />
+            <div className="flex items-start gap-2">
+              <div 
+                className="flex-1 text-sm leading-relaxed cursor-pointer hover-elevate rounded p-2 -m-2"
+                onClick={onStartEdit}
+                data-testid={`text-segment-${index}`}
+              >
+                {segment.text}
+                <Edit3 className="h-3 w-3 ml-2 inline-block opacity-0 group-hover:opacity-50 transition-opacity" />
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCopy(segment.text);
+                }}
+                data-testid={`button-copy-segment-${index}`}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
             </div>
           )}
         </div>
@@ -155,6 +208,7 @@ function SegmentEditor({ segment, index, onUpdate, isEditing, onStartEdit, onCan
 
 export default function TranscriptionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
   const [editingSegmentIndex, setEditingSegmentIndex] = useState<number | null>(null);
@@ -162,6 +216,10 @@ export default function TranscriptionDetailPage() {
   const [isFullEditMode, setIsFullEditMode] = useState(false);
   const [fullEditText, setFullEditText] = useState("");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const { data: transcription, isLoading, refetch } = useQuery<Transcription>({
     queryKey: ["/api/transcriptions", id],
@@ -178,24 +236,69 @@ export default function TranscriptionDetailPage() {
     if (transcription?.transcriptionText) {
       setFullEditText(transcription.transcriptionText);
     }
+    if (transcription?.title) {
+      setEditedTitle(transcription.title);
+    }
   }, [transcription]);
 
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = "Você tem alterações não salvas. Deseja realmente sair?";
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const saveMutation = useMutation({
-    mutationFn: async (data: { transcriptionText: string; segments?: TranscriptionSegment[] }) => {
+    mutationFn: async (data: { transcriptionText?: string; segments?: TranscriptionSegment[]; title?: string }) => {
       return apiRequest("PUT", `/api/transcriptions/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transcriptions", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/transcriptions"] });
       setHasUnsavedChanges(false);
       toast({
         title: "Salvo com sucesso",
-        description: "As alteracoes foram salvas.",
+        description: "As alterações foram salvas.",
       });
     },
     onError: () => {
       toast({
         title: "Erro ao salvar",
-        description: "Nao foi possivel salvar as alteracoes.",
+        description: "Não foi possível salvar as alterações.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/transcriptions/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transcriptions"] });
+      toast({
+        title: "Transcrição excluída",
+        description: "A transcrição foi removida com sucesso.",
+      });
+      navigate("/transcricoes");
+    },
+    onError: () => {
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir a transcrição.",
         variant: "destructive",
       });
     },
@@ -220,6 +323,68 @@ export default function TranscriptionDetailPage() {
     saveMutation.mutate({ transcriptionText: fullEditText });
     setIsFullEditMode(false);
   };
+
+  const handleSaveTitle = () => {
+    if (editedTitle.trim() && editedTitle !== transcription?.title) {
+      saveMutation.mutate({ title: editedTitle.trim() });
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleCancelTitleEdit = () => {
+    setEditedTitle(transcription?.title || "");
+    setIsEditingTitle(false);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      handleSaveTitle();
+    }
+    if (e.key === "Escape") {
+      handleCancelTitleEdit();
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedText(true);
+      toast({
+        title: "Copiado",
+        description: "Texto copiado para a área de transferência.",
+      });
+      setTimeout(() => setCopiedText(false), 2000);
+    } catch (error) {
+      toast({
+        title: "Erro ao copiar",
+        description: "Não foi possível copiar o texto.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyFullTranscription = () => {
+    if (transcription?.transcriptionText) {
+      copyToClipboard(transcription.transcriptionText);
+    }
+  };
+
+  const handleSaveAllRef = useRef(handleSaveAll);
+  handleSaveAllRef.current = handleSaveAll;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (hasUnsavedChanges && !saveMutation.isPending) {
+          handleSaveAllRef.current();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasUnsavedChanges, saveMutation.isPending]);
 
   const getInitials = (firstName?: string | null, lastName?: string | null) => {
     const first = firstName?.charAt(0) || "";
@@ -247,7 +412,7 @@ export default function TranscriptionDetailPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "completed":
-        return <Badge variant="default" className="bg-green-600">Concluido</Badge>;
+        return <Badge variant="default" className="bg-green-600">Concluído</Badge>;
       case "processing":
         return <Badge variant="secondary">Processando</Badge>;
       case "pending":
@@ -276,13 +441,32 @@ export default function TranscriptionDetailPage() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      
+      toast({
+        title: "Download iniciado",
+        description: `Arquivo ${transcription.title}.${format} baixado.`,
+      });
     } catch (error) {
       toast({
         title: "Erro no download",
-        description: "Nao foi possivel baixar o arquivo.",
+        description: "Não foi possível baixar o arquivo.",
         variant: "destructive",
       });
     }
+  };
+
+  const getCurrentWordCount = () => {
+    if (isFullEditMode) {
+      return fullEditText.split(/\s+/).filter(Boolean).length;
+    }
+    return transcription?.wordCount || 0;
+  };
+
+  const getCurrentCharCount = () => {
+    if (isFullEditMode) {
+      return fullEditText.length;
+    }
+    return transcription?.transcriptionText?.length || 0;
   };
 
   if (isLoading) {
@@ -307,12 +491,12 @@ export default function TranscriptionDetailPage() {
         <Card className="max-w-md">
           <CardContent className="pt-6 text-center">
             <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h2 className="text-xl font-semibold mb-2">Transcricao nao encontrada</h2>
+            <h2 className="text-xl font-semibold mb-2">Transcrição não encontrada</h2>
             <p className="text-muted-foreground mb-4">
-              A transcricao solicitada nao existe ou foi removida.
+              A transcrição solicitada não existe ou foi removida.
             </p>
             <Button asChild>
-              <Link href="/transcricoes">Voltar para Transcricoes</Link>
+              <Link href="/transcricoes">Voltar para Transcrições</Link>
             </Button>
           </CardContent>
         </Card>
@@ -328,7 +512,7 @@ export default function TranscriptionDetailPage() {
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" asChild>
-              <Link href="/transcricoes">
+              <Link href="/transcricoes" data-testid="button-back">
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
@@ -365,7 +549,7 @@ export default function TranscriptionDetailPage() {
                 <DropdownMenuItem asChild>
                   <Link href="/creditos" className="cursor-pointer">
                     <CreditCard className="mr-2 h-4 w-4" />
-                    Meus Creditos
+                    Meus Créditos
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -383,9 +567,41 @@ export default function TranscriptionDetailPage() {
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold" data-testid="text-title">{transcription.title}</h1>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    ref={titleInputRef}
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    onKeyDown={handleTitleKeyDown}
+                    className="text-2xl font-bold h-auto py-1 px-2 max-w-md"
+                    data-testid="input-title"
+                  />
+                  <Button size="icon" variant="ghost" onClick={handleSaveTitle} data-testid="button-save-title">
+                    <Check className="h-4 w-4" />
+                  </Button>
+                  <Button size="icon" variant="ghost" onClick={handleCancelTitleEdit}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group">
+                  <h1 className="text-2xl font-bold" data-testid="text-title">{transcription.title}</h1>
+                  {transcription.status === "completed" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => setIsEditingTitle(true)}
+                      data-testid="button-edit-title"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
               {getStatusBadge(transcription.status)}
             </div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
@@ -401,7 +617,7 @@ export default function TranscriptionDetailPage() {
                 <span>{transcription.wordCount.toLocaleString()} palavras</span>
               )}
               {transcription.pageCount && (
-                <span>{transcription.pageCount} paginas</span>
+                <span>{transcription.pageCount} páginas</span>
               )}
             </div>
           </div>
@@ -414,23 +630,77 @@ export default function TranscriptionDetailPage() {
                   ) : (
                     <Save className="mr-2 h-4 w-4" />
                   )}
-                  Salvar Alteracoes
+                  Salvar Alterações
                 </Button>
               )}
-              <Button variant="outline" onClick={() => downloadTranscription("txt")} data-testid="button-download-txt">
-                <Download className="mr-2 h-4 w-4" />
-                TXT
-              </Button>
-              <Button variant="outline" onClick={() => downloadTranscription("docx")} data-testid="button-download-docx">
-                <Download className="mr-2 h-4 w-4" />
-                DOCX
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="icon"
+                    onClick={copyFullTranscription}
+                    data-testid="button-copy-all"
+                  >
+                    {copiedText ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copiar texto completo</TooltipContent>
+              </Tooltip>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" data-testid="button-download">
+                    <Download className="mr-2 h-4 w-4" />
+                    Baixar
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => downloadTranscription("txt")} data-testid="button-download-txt">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Formato TXT
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => downloadTranscription("docx")} data-testid="button-download-docx">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Formato DOCX
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button asChild data-testid="button-analyze">
                 <Link href={`/analises/nova?transcricao=${transcription.id}`}>
                   <Brain className="mr-2 h-4 w-4" />
                   Analisar
                 </Link>
               </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="icon" className="text-destructive hover:text-destructive" data-testid="button-delete">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Excluir transcrição?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta ação não pode ser desfeita. A transcrição "{transcription.title}" será permanentemente removida.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="button-cancel-delete">Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => deleteMutation.mutate()}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={deleteMutation.isPending}
+                      data-testid="button-confirm-delete"
+                    >
+                      {deleteMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="mr-2 h-4 w-4" />
+                      )}
+                      Excluir
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           )}
         </div>
@@ -438,17 +708,29 @@ export default function TranscriptionDetailPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
             <div>
-              <CardTitle>Transcricao</CardTitle>
+              <CardTitle>Transcrição</CardTitle>
               <CardDescription>
                 Arquivo original: {transcription.originalFileName}
               </CardDescription>
             </div>
+            {transcription.status === "completed" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Type className="h-4 w-4" />
+                <span data-testid="text-word-count">
+                  {getCurrentWordCount().toLocaleString()} palavras
+                </span>
+                <span className="text-muted-foreground/50">|</span>
+                <span data-testid="text-char-count">
+                  {getCurrentCharCount().toLocaleString()} caracteres
+                </span>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             {transcription.status === "processing" ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-12 w-12 text-primary animate-spin mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Processando transcricao...</h3>
+                <h3 className="text-lg font-semibold mb-2">Processando transcrição...</h3>
                 {transcription.totalChunks && transcription.totalChunks > 1 ? (
                   <div className="w-full max-w-md space-y-4">
                     <div className="flex items-center justify-between text-sm">
@@ -499,14 +781,14 @@ export default function TranscriptionDetailPage() {
                   </div>
                 ) : (
                   <p className="text-muted-foreground text-center max-w-md">
-                    Sua transcricao esta sendo processada. Isso pode levar alguns minutos dependendo do tamanho do arquivo.
+                    Sua transcrição está sendo processada. Isso pode levar alguns minutos dependendo do tamanho do arquivo.
                   </p>
                 )}
               </div>
             ) : transcription.status === "error" ? (
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 text-destructive mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Erro na transcricao</h3>
+                <h3 className="text-lg font-semibold mb-2">Erro na transcrição</h3>
                 <p className="text-muted-foreground">
                   Ocorreu um erro ao processar este arquivo. Por favor, tente novamente.
                 </p>
@@ -535,6 +817,7 @@ export default function TranscriptionDetailPage() {
                           isEditing={editingSegmentIndex === index}
                           onStartEdit={() => setEditingSegmentIndex(index)}
                           onCancelEdit={() => setEditingSegmentIndex(null)}
+                          onCopy={copyToClipboard}
                         />
                       ))}
                     </div>
@@ -553,22 +836,28 @@ export default function TranscriptionDetailPage() {
                           className="min-h-[400px] font-mono text-sm"
                           data-testid="textarea-full-edit"
                         />
-                        <div className="flex items-center gap-2">
-                          <Button onClick={handleSaveFullText} disabled={saveMutation.isPending}>
-                            {saveMutation.isPending ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="mr-2 h-4 w-4" />
-                            )}
-                            Salvar
-                          </Button>
-                          <Button variant="outline" onClick={() => {
-                            setFullEditText(transcription.transcriptionText || "");
-                            setIsFullEditMode(false);
-                          }}>
-                            <X className="mr-2 h-4 w-4" />
-                            Cancelar
-                          </Button>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Button onClick={handleSaveFullText} disabled={saveMutation.isPending}>
+                              {saveMutation.isPending ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Save className="mr-2 h-4 w-4" />
+                              )}
+                              Salvar
+                            </Button>
+                            <Button variant="outline" onClick={() => {
+                              setFullEditText(transcription.transcriptionText || "");
+                              setIsFullEditMode(false);
+                              setHasUnsavedChanges(false);
+                            }}>
+                              <X className="mr-2 h-4 w-4" />
+                              Cancelar
+                            </Button>
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {fullEditText.split(/\s+/).filter(Boolean).length} palavras | {fullEditText.length} caracteres
+                          </span>
                         </div>
                       </>
                     ) : (
@@ -600,22 +889,28 @@ export default function TranscriptionDetailPage() {
                       className="min-h-[400px] font-mono text-sm"
                       data-testid="textarea-full-edit"
                     />
-                    <div className="flex items-center gap-2">
-                      <Button onClick={handleSaveFullText} disabled={saveMutation.isPending}>
-                        {saveMutation.isPending ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Save className="mr-2 h-4 w-4" />
-                        )}
-                        Salvar
-                      </Button>
-                      <Button variant="outline" onClick={() => {
-                        setFullEditText(transcription.transcriptionText || "");
-                        setIsFullEditMode(false);
-                      }}>
-                        <X className="mr-2 h-4 w-4" />
-                        Cancelar
-                      </Button>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Button onClick={handleSaveFullText} disabled={saveMutation.isPending}>
+                          {saveMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="mr-2 h-4 w-4" />
+                          )}
+                          Salvar
+                        </Button>
+                        <Button variant="outline" onClick={() => {
+                          setFullEditText(transcription.transcriptionText || "");
+                          setIsFullEditMode(false);
+                          setHasUnsavedChanges(false);
+                        }}>
+                          <X className="mr-2 h-4 w-4" />
+                          Cancelar
+                        </Button>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {fullEditText.split(/\s+/).filter(Boolean).length} palavras | {fullEditText.length} caracteres
+                      </span>
                     </div>
                   </>
                 ) : (
@@ -642,6 +937,30 @@ export default function TranscriptionDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {hasUnsavedChanges && (
+          <div className="fixed bottom-6 right-6 z-50">
+            <Card className="bg-primary text-primary-foreground shadow-lg">
+              <CardContent className="flex items-center gap-4 p-4">
+                <span className="text-sm font-medium">Você tem alterações não salvas</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSaveAll}
+                  disabled={saveMutation.isPending}
+                  data-testid="button-save-floating"
+                >
+                  {saveMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  Salvar (Ctrl+S)
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </main>
     </div>
   );
