@@ -289,14 +289,16 @@ export default function AdminPage() {
                             </p>
                             <div className="flex gap-2 mt-2 flex-wrap">
                               <Badge variant="secondary" className="text-xs">
-                                Transcrição: {u.transcriptionCredits || 0}
-                              </Badge>
-                              <Badge variant="secondary" className="text-xs">
-                                Análise: {u.analysisCredits || 0}
+                                Créditos: {u.credits || 0}
                               </Badge>
                               {u.freeTranscriptionUsed && (
                                 <Badge variant="outline" className="text-xs">
-                                  Gratuita usada
+                                  Transcrição grátis usada
+                                </Badge>
+                              )}
+                              {u.freeAnalysisUsed && (
+                                <Badge variant="outline" className="text-xs">
+                                  Análise grátis usada
                                 </Badge>
                               )}
                             </div>
