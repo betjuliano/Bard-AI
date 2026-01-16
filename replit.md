@@ -47,6 +47,16 @@ Preferred communication style: Simple, everyday language.
 - **Analysis**: OpenAI GPT for qualitative content analysis following Bardin's methodology
 - **Service Location**: `server/openai.ts`
 
+### Transcription Editing Features (January 2026)
+- **Inline Title Editing**: Click pencil icon to edit title with save/cancel buttons
+- **Text Editing**: Full transcription text editing with per-segment editing
+- **Delete with Confirmation**: AlertDialog confirmation before deletion
+- **Copy to Clipboard**: Copy full transcription or individual segments
+- **Keyboard Shortcuts**: Ctrl+S (save all), Escape (cancel editing), Ctrl+Enter (save segment)
+- **Unsaved Changes Warning**: Browser beforeunload warning if unsaved changes exist
+- **Real-time Counts**: Word/character count displayed during editing
+- **Floating Save Indicator**: Visual indicator when unsaved changes exist
+
 ### Build System
 - **Development**: Vite dev server with HMR for frontend, tsx for backend
 - **Production**: esbuild bundles server code, Vite builds client to `dist/public`
