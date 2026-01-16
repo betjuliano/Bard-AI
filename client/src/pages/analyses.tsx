@@ -129,7 +129,7 @@ export default function AnalysesPage() {
             <Link href="/creditos">
               <Button variant="outline" size="sm" className="gap-2">
                 <Sparkles className="h-4 w-4" />
-                <span className="font-semibold">{user?.analysisCredits || 0}</span>
+                <span className="font-semibold">{user?.credits || 0}</span>
               </Button>
             </Link>
             <ThemeToggle />
