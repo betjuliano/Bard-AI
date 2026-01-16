@@ -33,12 +33,14 @@ Preferred communication style: Simple, everyday language.
 - **Migrations**: Managed via drizzle-kit with output to `./migrations`
 
 ### Admin System
-- **Admin Email**: Defined in `shared/schema.ts` as `ADMIN_EMAIL`
+- **Admin Email**: Defined in `shared/schema.ts` as `ADMIN_EMAIL` (admjulianoo@gmail.com)
 - **Access Control**: Double-check with email match AND isAdmin flag
 - **Admin Routes**: Protected with isAuthenticated + isAdmin middleware
 - **Audit Trail**: All admin actions logged in admin_actions table
 - **Manual Credits**: Admin can add credits via /admin page with reason logging
-- **Admin Page**: `/admin` - Hidden from navigation, shows "Acesso Restrito" for non-admins
+- **Admin Page**: `/admin` - Accessible to all users, shows "Acesso Restrito" for non-admins
+- **Data Sanitization**: All user-returning endpoints use `sanitizeUser()` helper to exclude sensitive fields (cpf, stripeCustomerId)
+- **Admin Tabs**: Users, Tokens, Revenue, System - with stats cards and management features
 
 ### AI Integration
 - **Transcription**: OpenAI Whisper API (`whisper-1` model) for Portuguese language audio

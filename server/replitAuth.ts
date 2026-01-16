@@ -51,13 +51,14 @@ function updateUserSession(
 }
 
 async function upsertUser(claims: any) {
-  await storage.upsertUser({
+  const user = await storage.upsertUser({
     id: claims["sub"],
     email: claims["email"],
     firstName: claims["first_name"],
     lastName: claims["last_name"],
     profileImageUrl: claims["profile_image_url"],
   });
+  return user;
 }
 
 export async function setupAuth(app: Express) {
@@ -72,9 +73,13 @@ export async function setupAuth(app: Express) {
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback
   ) => {
-    const user = {};
+    const user = {} as any;
     updateUserSession(user, tokens);
-    await upsertUser(tokens.claims());
+    const dbUser = await upsertUser(tokens.claims());
+    // Override sub with actual database user id in case of email conflict resolution
+    if (dbUser && dbUser.id !== user.claims.sub) {
+      user.claims = { ...user.claims, sub: dbUser.id };
+    }
     verified(null, user);
   };
 

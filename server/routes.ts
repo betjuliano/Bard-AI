@@ -45,6 +45,27 @@ const upload = multer({
   },
 });
 
+// Helper function to sanitize user data - removes sensitive fields
+function sanitizeUser(user: any) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    fullName: user.fullName,
+    profileImageUrl: user.profileImageUrl,
+    freeTranscriptionUsed: user.freeTranscriptionUsed,
+    freeAnalysisUsed: user.freeAnalysisUsed,
+    credits: user.credits,
+    isAdmin: user.isAdmin,
+    isActive: user.isActive,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Auth middleware
   await setupAuth(app);
@@ -74,7 +95,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
-      res.json(user);
+      res.json(sanitizeUser(user));
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
@@ -465,11 +486,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ADMIN ROUTES - Protected with isAdmin middleware
   // ========================================
 
-  // Get all users (excluding admin)
+  // Get all users (excluding admin) - sanitized
   app.get("/api/admin/users", isAuthenticated, isAdmin, async (req: any, res) => {
     try {
       const users = await storage.getAllUsersExcludingAdmin();
-      res.json(users);
+      res.json(users.map(sanitizeUser));
     } catch (error) {
       console.error("Error fetching users:", error);
       res.status(500).json({ message: "Failed to fetch users" });
@@ -523,8 +544,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "User not found" });
       }
 
+      const creditsBefore = targetUser.credits || 0;
+      
       // Add credits to user
       const updatedUser = await storage.addCredits(userId, amount);
+
+      // Create credit transaction record
+      await storage.createCreditTransaction({
+        userId,
+        type: "admin_grant",
+        amount,
+        creditsBefore,
+        creditsAfter: creditsBefore + amount,
+        description: reason,
+        adminId,
+      });
 
       // Create manual payment record
       await storage.createManualPayment({
@@ -550,7 +584,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ 
         success: true, 
         message: `${amount} créditos adicionados com sucesso.`,
-        user: updatedUser 
+        user: sanitizeUser(updatedUser) 
       });
     } catch (error) {
       console.error("Error adding manual credits:", error);
@@ -589,10 +623,211 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         payload: { email: user.email },
       });
 
-      res.json({ success: true, user: updatedUser });
+      res.json({ success: true, user: sanitizeUser(updatedUser) });
     } catch (error) {
       console.error("Error setting up admin:", error);
       res.status(500).json({ message: "Failed to setup admin" });
+    }
+  });
+
+  // Get all users (for admin dashboard) - sanitized
+  app.get("/api/admin/users/all", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users.map(sanitizeUser));
+    } catch (error) {
+      console.error("Error fetching all users:", error);
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  // Toggle user active status
+  app.patch("/api/admin/users/:userId/status", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const adminId = req.user.claims.sub;
+      const { userId } = req.params;
+      const { isActive } = req.body;
+
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({ message: "isActive must be a boolean" });
+      }
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Prevent deactivating the admin
+      if (targetUser.email === ADMIN_EMAIL) {
+        return res.status(403).json({ message: "Cannot deactivate admin user" });
+      }
+
+      const updatedUser = await storage.setUserActiveStatus(userId, isActive);
+
+      await storage.createAdminAction({
+        adminId,
+        targetUserId: userId,
+        actionType: isActive ? "user_activate" : "user_deactivate",
+        payload: { previousStatus: targetUser.isActive },
+      });
+
+      res.json({ success: true, user: sanitizeUser(updatedUser) });
+    } catch (error) {
+      console.error("Error toggling user status:", error);
+      res.status(500).json({ message: "Failed to update user status" });
+    }
+  });
+
+  // Get user access logs
+  app.get("/api/admin/users/:userId/access-logs", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const logs = await storage.getUserAccessLogs(userId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching user access logs:", error);
+      res.status(500).json({ message: "Failed to fetch access logs" });
+    }
+  });
+
+  // Get all access logs
+  app.get("/api/admin/access-logs", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 500;
+      const logs = await storage.getAllAccessLogs(limit);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching all access logs:", error);
+      res.status(500).json({ message: "Failed to fetch access logs" });
+    }
+  });
+
+  // Get credit transactions
+  app.get("/api/admin/credit-transactions", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 500;
+      const transactions = await storage.getAllCreditTransactions(limit);
+      res.json(transactions);
+    } catch (error) {
+      console.error("Error fetching credit transactions:", error);
+      res.status(500).json({ message: "Failed to fetch credit transactions" });
+    }
+  });
+
+  // Get credit transactions summary
+  app.get("/api/admin/credit-transactions/summary", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const summary = await storage.getCreditTransactionsSummary();
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching credit transactions summary:", error);
+      res.status(500).json({ message: "Failed to fetch summary" });
+    }
+  });
+
+  // Get user credit transactions
+  app.get("/api/admin/users/:userId/credit-transactions", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const transactions = await storage.getCreditTransactions(userId, limit);
+      res.json(transactions);
+    } catch (error) {
+      console.error("Error fetching user credit transactions:", error);
+      res.status(500).json({ message: "Failed to fetch credit transactions" });
+    }
+  });
+
+  // Get revenue stats
+  app.get("/api/admin/revenue/stats", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const stats = await storage.getRevenueStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching revenue stats:", error);
+      res.status(500).json({ message: "Failed to fetch revenue stats" });
+    }
+  });
+
+  // Get revenue by period
+  app.get("/api/admin/revenue/period", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+      
+      const payments = await storage.getRevenueByPeriod(startDate, endDate);
+      res.json(payments);
+    } catch (error) {
+      console.error("Error fetching revenue by period:", error);
+      res.status(500).json({ message: "Failed to fetch revenue data" });
+    }
+  });
+
+  // Get system logs
+  app.get("/api/admin/system-logs", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 500;
+      const severity = req.query.severity as string | undefined;
+      const logs = await storage.getSystemLogs(limit, severity);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching system logs:", error);
+      res.status(500).json({ message: "Failed to fetch system logs" });
+    }
+  });
+
+  // Get performance stats
+  app.get("/api/admin/performance/stats", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const stats = await storage.getPerformanceStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching performance stats:", error);
+      res.status(500).json({ message: "Failed to fetch performance stats" });
+    }
+  });
+
+  // Get admin actions (audit trail)
+  app.get("/api/admin/actions", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const actions = await storage.getAdminActions();
+      res.json(actions);
+    } catch (error) {
+      console.error("Error fetching admin actions:", error);
+      res.status(500).json({ message: "Failed to fetch admin actions" });
+    }
+  });
+
+  // Delete user (soft delete - just deactivate)
+  app.delete("/api/admin/users/:userId", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const adminId = req.user.claims.sub;
+      const { userId } = req.params;
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Prevent deleting the admin
+      if (targetUser.email === ADMIN_EMAIL) {
+        return res.status(403).json({ message: "Cannot delete admin user" });
+      }
+
+      // Soft delete by deactivating
+      const updatedUser = await storage.setUserActiveStatus(userId, false);
+
+      await storage.createAdminAction({
+        adminId,
+        targetUserId: userId,
+        actionType: "user_deleted",
+        payload: { email: targetUser.email },
+      });
+
+      res.json({ success: true, message: "Usuário desativado com sucesso" });
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ message: "Failed to delete user" });
     }
   });
 }

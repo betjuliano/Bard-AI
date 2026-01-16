@@ -35,6 +35,7 @@ function Router() {
 
   return (
     <Switch>
+      <Route path="/admin" component={AdminPage} />
       {!isAuthenticated ? (
         <Route path="/" component={Landing} />
       ) : (
@@ -49,7 +50,6 @@ function Router() {
           <Route path="/creditos" component={CreditsPage} />
           <Route path="/checkout/success" component={CheckoutSuccessPage} />
           <Route path="/checkout/cancel" component={CheckoutCancelPage} />
-          <Route path="/admin" component={AdminPage} />
         </>
       )}
       <Route component={NotFound} />
