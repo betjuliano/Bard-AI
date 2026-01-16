@@ -142,7 +142,7 @@ export default function AnalysisDetailPage() {
             <Link href="/creditos">
               <Button variant="outline" size="sm" className="gap-2">
                 <Sparkles className="h-4 w-4" />
-                <span className="font-semibold">{user?.analysisCredits || 0}</span>
+                <span className="font-semibold">{user?.credits || 0}</span>
               </Button>
             </Link>
             <ThemeToggle />
@@ -328,7 +328,7 @@ export default function AnalysisDetailPage() {
                           {quotes.map((quote, index) => (
                             <div key={index} className="border-l-2 border-primary pl-4 py-2">
                               <p className="text-sm italic mb-2">"{quote.text}"</p>
-                              <Badge variant="outline" size="sm">{quote.category}</Badge>
+                              <Badge variant="outline">{quote.category}</Badge>
                             </div>
                           ))}
                         </div>

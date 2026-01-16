@@ -58,7 +58,7 @@ export default function NewAnalysisPage() {
   const [theoreticalText, setTheoreticalText] = useState("");
   const [dragActive, setDragActive] = useState(false);
 
-  const hasAnalysisCredit = (user?.analysisCredits || 0) > 0 || !user?.freeTranscriptionUsed;
+  const hasAnalysisCredit = (user?.credits || 0) > 0 || !user?.freeAnalysisUsed;
   const canAnalyze = hasAnalysisCredit;
 
   const { data: transcriptions } = useQuery<Transcription[]>({
@@ -188,7 +188,7 @@ export default function NewAnalysisPage() {
             <Link href="/creditos">
               <Button variant="outline" size="sm" className="gap-2">
                 <Sparkles className="h-4 w-4" />
-                <span className="font-semibold">{user?.analysisCredits || 0}</span>
+                <span className="font-semibold">{user?.credits || 0}</span>
               </Button>
             </Link>
             <ThemeToggle />

@@ -182,11 +182,7 @@ export default function TranscriptionDetailPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (data: { transcriptionText: string; segments?: TranscriptionSegment[] }) => {
-      return apiRequest(`/api/transcriptions/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-        headers: { "Content-Type": "application/json" },
-      });
+      return apiRequest("PUT", `/api/transcriptions/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transcriptions", id] });
