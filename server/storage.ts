@@ -4,6 +4,9 @@ import {
   analyses,
   payments,
   adminActions,
+  userAccessLogs,
+  creditTransactions,
+  systemLogs,
   ADMIN_EMAIL,
   type User,
   type UpsertUser,
@@ -15,10 +18,16 @@ import {
   type InsertPayment,
   type AdminAction,
   type InsertAdminAction,
+  type UserAccessLog,
+  type InsertUserAccessLog,
+  type CreditTransaction,
+  type InsertCreditTransaction,
+  type SystemLog,
+  type InsertSystemLog,
   type TranscriptionChunkProgress,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, ilike, or, ne, sql } from "drizzle-orm";
+import { eq, desc, and, ilike, or, ne, sql, gte, lte, count, sum } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
@@ -58,12 +67,35 @@ export interface IStorage {
 
   // Admin operations
   getAllUsersExcludingAdmin(): Promise<User[]>;
+  getAllUsers(): Promise<User[]>;
   getAllPayments(): Promise<Payment[]>;
   getUserByEmail(email: string): Promise<User | undefined>;
   setUserAsAdmin(userId: string): Promise<User>;
+  setUserActiveStatus(userId: string, isActive: boolean): Promise<User>;
+  updateUserLastLogin(userId: string): Promise<void>;
   createManualPayment(payment: InsertPayment): Promise<Payment>;
   createAdminAction(action: InsertAdminAction): Promise<AdminAction>;
   getAdminActions(): Promise<AdminAction[]>;
+
+  // User access logs
+  createUserAccessLog(log: InsertUserAccessLog): Promise<UserAccessLog>;
+  getUserAccessLogs(userId: string, limit?: number): Promise<UserAccessLog[]>;
+  getAllAccessLogs(limit?: number): Promise<UserAccessLog[]>;
+
+  // Credit transactions
+  createCreditTransaction(transaction: InsertCreditTransaction): Promise<CreditTransaction>;
+  getCreditTransactions(userId: string, limit?: number): Promise<CreditTransaction[]>;
+  getAllCreditTransactions(limit?: number): Promise<CreditTransaction[]>;
+  getCreditTransactionsSummary(): Promise<{ totalCreditsUsed: number; totalCreditsAdded: number; transactionCount: number }>;
+
+  // System logs
+  createSystemLog(log: InsertSystemLog): Promise<SystemLog>;
+  getSystemLogs(limit?: number, severity?: string): Promise<SystemLog[]>;
+  getPerformanceStats(): Promise<{ avgDuration: number; errorCount: number; warningCount: number; totalLogs: number }>;
+
+  // Revenue analytics
+  getRevenueStats(): Promise<{ totalRevenue: number; totalPayments: number; completedPayments: number }>;
+  getRevenueByPeriod(startDate: Date, endDate: Date): Promise<Payment[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -378,6 +410,153 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(adminActions)
       .orderBy(desc(adminActions.createdAt));
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .orderBy(desc(users.createdAt));
+  }
+
+  async setUserActiveStatus(userId: string, isActive: boolean): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ isActive, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async updateUserLastLogin(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ lastLoginAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
+  // User access logs
+  async createUserAccessLog(log: InsertUserAccessLog): Promise<UserAccessLog> {
+    const [newLog] = await db
+      .insert(userAccessLogs)
+      .values(log)
+      .returning();
+    return newLog;
+  }
+
+  async getUserAccessLogs(userId: string, limit: number = 100): Promise<UserAccessLog[]> {
+    return await db
+      .select()
+      .from(userAccessLogs)
+      .where(eq(userAccessLogs.userId, userId))
+      .orderBy(desc(userAccessLogs.createdAt))
+      .limit(limit);
+  }
+
+  async getAllAccessLogs(limit: number = 500): Promise<UserAccessLog[]> {
+    return await db
+      .select()
+      .from(userAccessLogs)
+      .orderBy(desc(userAccessLogs.createdAt))
+      .limit(limit);
+  }
+
+  // Credit transactions
+  async createCreditTransaction(transaction: InsertCreditTransaction): Promise<CreditTransaction> {
+    const [newTransaction] = await db
+      .insert(creditTransactions)
+      .values(transaction)
+      .returning();
+    return newTransaction;
+  }
+
+  async getCreditTransactions(userId: string, limit: number = 100): Promise<CreditTransaction[]> {
+    return await db
+      .select()
+      .from(creditTransactions)
+      .where(eq(creditTransactions.userId, userId))
+      .orderBy(desc(creditTransactions.createdAt))
+      .limit(limit);
+  }
+
+  async getAllCreditTransactions(limit: number = 500): Promise<CreditTransaction[]> {
+    return await db
+      .select()
+      .from(creditTransactions)
+      .orderBy(desc(creditTransactions.createdAt))
+      .limit(limit);
+  }
+
+  async getCreditTransactionsSummary(): Promise<{ totalCreditsUsed: number; totalCreditsAdded: number; transactionCount: number }> {
+    const result = await db
+      .select({
+        totalCreditsUsed: sql<number>`COALESCE(SUM(CASE WHEN ${creditTransactions.amount} < 0 THEN ABS(${creditTransactions.amount}) ELSE 0 END), 0)`,
+        totalCreditsAdded: sql<number>`COALESCE(SUM(CASE WHEN ${creditTransactions.amount} > 0 THEN ${creditTransactions.amount} ELSE 0 END), 0)`,
+        transactionCount: count(),
+      })
+      .from(creditTransactions);
+    return result[0] || { totalCreditsUsed: 0, totalCreditsAdded: 0, transactionCount: 0 };
+  }
+
+  // System logs
+  async createSystemLog(log: InsertSystemLog): Promise<SystemLog> {
+    const [newLog] = await db
+      .insert(systemLogs)
+      .values(log)
+      .returning();
+    return newLog;
+  }
+
+  async getSystemLogs(limit: number = 500, severity?: string): Promise<SystemLog[]> {
+    if (severity) {
+      return await db
+        .select()
+        .from(systemLogs)
+        .where(eq(systemLogs.severity, severity))
+        .orderBy(desc(systemLogs.createdAt))
+        .limit(limit);
+    }
+    return await db
+      .select()
+      .from(systemLogs)
+      .orderBy(desc(systemLogs.createdAt))
+      .limit(limit);
+  }
+
+  async getPerformanceStats(): Promise<{ avgDuration: number; errorCount: number; warningCount: number; totalLogs: number }> {
+    const result = await db
+      .select({
+        avgDuration: sql<number>`COALESCE(AVG(${systemLogs.durationMs}), 0)`,
+        errorCount: sql<number>`COUNT(CASE WHEN ${systemLogs.severity} = 'error' THEN 1 END)`,
+        warningCount: sql<number>`COUNT(CASE WHEN ${systemLogs.severity} = 'warning' THEN 1 END)`,
+        totalLogs: count(),
+      })
+      .from(systemLogs);
+    return result[0] || { avgDuration: 0, errorCount: 0, warningCount: 0, totalLogs: 0 };
+  }
+
+  // Revenue analytics
+  async getRevenueStats(): Promise<{ totalRevenue: number; totalPayments: number; completedPayments: number }> {
+    const result = await db
+      .select({
+        totalRevenue: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'completed' THEN ${payments.amount} ELSE 0 END), 0)`,
+        totalPayments: count(),
+        completedPayments: sql<number>`COUNT(CASE WHEN ${payments.status} = 'completed' THEN 1 END)`,
+      })
+      .from(payments);
+    return result[0] || { totalRevenue: 0, totalPayments: 0, completedPayments: 0 };
+  }
+
+  async getRevenueByPeriod(startDate: Date, endDate: Date): Promise<Payment[]> {
+    return await db
+      .select()
+      .from(payments)
+      .where(and(
+        gte(payments.createdAt, startDate),
+        lte(payments.createdAt, endDate),
+        eq(payments.status, "completed")
+      ))
+      .orderBy(desc(payments.createdAt));
   }
 
 }
