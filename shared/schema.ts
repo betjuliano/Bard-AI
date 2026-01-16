@@ -41,6 +41,8 @@ export const users = pgTable("users", {
   freeAnalysisUsed: boolean("free_analysis_used").default(false),
   credits: integer("credits").default(0),
   isAdmin: boolean("is_admin").default(false),
+  isActive: boolean("is_active").default(true),
+  lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -49,6 +51,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   transcriptions: many(transcriptions),
   analyses: many(analyses),
   payments: many(payments),
+  accessLogs: many(userAccessLogs),
+  creditTransactions: many(creditTransactions),
 }));
 
 // Transcription segment type for timestamps
@@ -157,6 +161,70 @@ export const adminActions = pgTable("admin_actions", {
   payload: jsonb("payload"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// User access logs for tracking logins and activity
+export const userAccessLogs = pgTable("user_access_logs", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  action: varchar("action").notNull(), // 'login', 'logout', 'upload', 'transcription', 'analysis', 'purchase'
+  ipAddress: varchar("ip_address"),
+  userAgent: text("user_agent"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const userAccessLogsRelations = relations(userAccessLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [userAccessLogs.userId],
+    references: [users.id],
+  }),
+}));
+
+// Credit transactions for detailed token usage tracking
+export const creditTransactions = pgTable("credit_transactions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  type: varchar("type").notNull(), // 'purchase', 'transcription', 'analysis', 'admin_grant', 'refund'
+  amount: integer("amount").notNull(), // positive for additions, negative for usage
+  creditsBefore: integer("credits_before").notNull(),
+  creditsAfter: integer("credits_after").notNull(),
+  referenceId: varchar("reference_id"), // transcription_id, analysis_id, payment_id
+  referenceType: varchar("reference_type"), // 'transcription', 'analysis', 'payment'
+  description: text("description"),
+  adminId: varchar("admin_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const creditTransactionsRelations = relations(creditTransactions, ({ one }) => ({
+  user: one(users, {
+    fields: [creditTransactions.userId],
+    references: [users.id],
+  }),
+  admin: one(users, {
+    fields: [creditTransactions.adminId],
+    references: [users.id],
+  }),
+}));
+
+// System logs for performance monitoring
+export const systemLogs = pgTable("system_logs", {
+  id: serial("id").primaryKey(),
+  eventType: varchar("event_type").notNull(), // 'transcription', 'analysis', 'error', 'warning', 'info'
+  severity: varchar("severity").notNull().default("info"), // 'info', 'warning', 'error', 'critical'
+  message: text("message").notNull(),
+  context: jsonb("context"), // Additional context data
+  durationMs: integer("duration_ms"), // Processing time for performance tracking
+  userId: varchar("user_id").references(() => users.id),
+  recommendation: text("recommendation"), // Suggested improvements
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const systemLogsRelations = relations(systemLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [systemLogs.userId],
+    references: [users.id],
+  }),
+}));
 
 export const adminActionsRelations = relations(adminActions, ({ one }) => ({
   admin: one(users, {
@@ -272,6 +340,21 @@ export const insertAdminActionSchema = createInsertSchema(adminActions).omit({
   createdAt: true,
 });
 
+export const insertUserAccessLogSchema = createInsertSchema(userAccessLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCreditTransactionSchema = createInsertSchema(creditTransactions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertSystemLogSchema = createInsertSchema(systemLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -288,3 +371,12 @@ export type Payment = typeof payments.$inferSelect;
 
 export type InsertAdminAction = z.infer<typeof insertAdminActionSchema>;
 export type AdminAction = typeof adminActions.$inferSelect;
+
+export type InsertUserAccessLog = z.infer<typeof insertUserAccessLogSchema>;
+export type UserAccessLog = typeof userAccessLogs.$inferSelect;
+
+export type InsertCreditTransaction = z.infer<typeof insertCreditTransactionSchema>;
+export type CreditTransaction = typeof creditTransactions.$inferSelect;
+
+export type InsertSystemLog = z.infer<typeof insertSystemLogSchema>;
+export type SystemLog = typeof systemLogs.$inferSelect;
